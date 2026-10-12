@@ -25,7 +25,7 @@ const TextCase = (() => {
     + "what when don't can't won't we she they our by or not no yes come go get let do so up "
     + "down out over into one two three world life man woman girl girls boys heart soul love lover night "
     + "time baby song songs sweet little big old new day days way home light dark moon star stars fire rain dream "
-    + "dreams summer winter christmas king queen lady mister miss till until wild child free sing yeah").split(' '));
+    + "dreams summer winter christmas king queen lady mister miss till until wild child free sing yeah pink").split(' '));
   // Plak etiketleri: kelimenin kendisi yabancıdır ama bulunduğu adı yabancı yapmaz
   // (ALTIN YILLAR VOL. 2, AYRILIK (LIVE), THE BEST OF EMEL SAYIN).
   const TAGS = new Set(('vol volume live remix mix edit radio extended version instrumental feat featuring ft '
