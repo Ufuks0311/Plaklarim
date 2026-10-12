@@ -26,17 +26,27 @@ function toast(message) {
   toast.timer = setTimeout(() => { el.hidden = true; }, 2500);
 }
 
-// Şarkılar { title, artist } nesneleri olarak saklanır. İlk sürümde düz metin
-// olarak kaydedilmiş şarkılar okunurken bu yapıya çevrilir.
+// Şarkılar { no, title, artist } nesneleri olarak saklanır. Eski sürümlerde
+// düz metin ya da numarasız kaydedilmiş şarkılar okunurken bu yapıya çevrilir.
+const sideLetter = (side) => side.slice(-1);
+const autoTrackNo = (side, i) => `${sideLetter(side)}${i + 1}`;
+
 function tracksOf(record, side) {
-  return (record[side] || []).map((t) => (typeof t === 'string'
-    ? { title: t, artist: '' }
-    : { title: t.title || '', artist: t.artist || '' }));
+  return (record[side] || []).map((t, i) => (typeof t === 'string'
+    ? { no: autoTrackNo(side, i), title: t, artist: '' }
+    : { no: t.no || autoTrackNo(side, i), title: t.title || '', artist: t.artist || '' }));
 }
 
-const collator = new Intl.Collator('tr', { sensitivity: 'base' });
-const byArtistThenAlbum = (a, b) =>
+const collator = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
+// Sıra numarası olanlar numaraya göre başta, olmayanlar sanatçıya göre sonda.
+const byRecordOrder = (a, b) =>
+  (!a.no - !b.no) || collator.compare(a.no || '', b.no || '') ||
   collator.compare(a.artist, b.artist) || collator.compare(a.album, b.album);
+
+function nextRecordNo(records) {
+  const nums = records.map((r) => parseInt(r.no, 10)).filter(Number.isFinite);
+  return String(nums.length ? Math.max(...nums) + 1 : records.length + 1);
+}
 
 // ---------- Yönlendirme ----------
 
@@ -62,7 +72,7 @@ window.addEventListener('hashchange', route);
 let lastQuery = '';
 
 async function renderList() {
-  const records = (await DB.all()).sort(byArtistThenAlbum);
+  const records = (await DB.all()).sort(byRecordOrder);
   view.innerHTML = `
     <div class="search">
       <input type="search" id="q" placeholder="Sanatçı, albüm veya şarkı ara" value="${esc(lastQuery)}" autocomplete="off">
@@ -92,7 +102,7 @@ async function renderList() {
     const term = q.value.trim().toLocaleLowerCase('tr');
     lastQuery = q.value;
     const shown = term
-      ? records.filter((r) => [r.artist, r.album, r.label, r.genre, r.year,
+      ? records.filter((r) => [r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
           ...[...tracksOf(r, 'sideA'), ...tracksOf(r, 'sideB')].flatMap((t) => [t.title, t.artist])]
           .join('\n').toLocaleLowerCase('tr').includes(term))
       : records;
@@ -101,10 +111,11 @@ async function renderList() {
       : `${records.length} plak`;
     grid.innerHTML = shown.map((r) => `
       <li>
-        <a href="#/plak/${esc(r.id)}" class="card">
+        <a href="#/plak/${esc(r.id)}" class="card${r.no ? ' numbered' : ''}">
           ${thumbs.get(r.id)
             ? `<img src="${thumbs.get(r.id)}" alt="" loading="lazy">`
             : '<div class="no-cover" aria-hidden="true"></div>'}
+          ${r.no ? `<span class="badge">#${esc(r.no)}</span>` : ''}
           <strong>${esc(r.album)}</strong>
           <span>${esc(r.artist)}${r.year ? ` · ${esc(r.year)}` : ''}</span>
         </a>
@@ -122,10 +133,13 @@ function trackList(title, tracks, albumArtist) {
   return `
     <section class="side">
       <h3>${title}</h3>
-      <ol>${tracks.map((t) => `<li>
-        <span class="track-title">${esc(t.title)}</span>
-        ${t.artist && t.artist !== albumArtist ? `<span class="track-artist">${esc(t.artist)}</span>` : ''}
-      </li>`).join('')}</ol>
+      <ul class="tracklist">${tracks.map((t) => `<li>
+        <span class="track-no">${esc(t.no)}</span>
+        <span>
+          <span class="track-title">${esc(t.title)}</span>
+          ${t.artist && t.artist !== albumArtist ? `<span class="track-artist">${esc(t.artist)}</span>` : ''}
+        </span>
+      </li>`).join('')}</ul>
     </section>`;
 }
 
@@ -153,6 +167,7 @@ async function renderDetail(id) {
   view.innerHTML = `
     <article class="detail">
       <a href="#/" class="back">‹ Tüm plaklar</a>
+      ${r.no ? `<p class="record-no">Sıra no #${esc(r.no)}</p>` : ''}
       <h1>${esc(r.album)}</h1>
       <p class="artist">${esc(r.artist)}</p>
       ${covers ? `<div class="covers">${covers}</div>` : ''}
@@ -215,11 +230,15 @@ function coverPicker(key, label, blob) {
     </div>`;
 }
 
-function trackRow(t = { title: '', artist: '' }) {
+// Otomatik numarayla aynı olan sıra numarası boş gösterilir; böylece şarkı
+// silinince ya da eklenince numaralar kendiliğinden kayar.
+function trackRow(t = { no: '', title: '', artist: '' }, side, i) {
+  const auto = autoTrackNo(side, i);
   return `
     <li class="track-row">
+      <input class="t-no" placeholder="${auto}" value="${t.no === auto ? '' : esc(t.no)}" autocomplete="off" aria-label="Sıra no">
       <input class="t-title" placeholder="Şarkı adı" value="${esc(t.title)}" autocomplete="off" aria-label="Şarkı adı">
-      <input class="t-artist" placeholder="Söyleyen (boşsa albüm sanatçısı)" value="${esc(t.artist)}" autocomplete="off" aria-label="Söyleyen">
+      <input class="t-artist" placeholder="Söyleyen" value="${esc(t.artist)}" autocomplete="off" aria-label="Söyleyen">
       <button type="button" class="icon-btn remove-track" aria-label="Şarkıyı sil">×</button>
     </li>`;
 }
@@ -228,7 +247,7 @@ function trackEditor(side, label, tracks) {
   return `
     <fieldset class="tracks" data-side="${side}">
       <legend>${label}</legend>
-      <ol class="track-rows">${(tracks.length ? tracks : [undefined]).map(trackRow).join('')}</ol>
+      <ol class="track-rows">${(tracks.length ? tracks : [undefined]).map((t, i) => trackRow(t, side, i)).join('')}</ol>
       <button type="button" class="btn small add-track">+ Şarkı ekle</button>
     </fieldset>`;
 }
@@ -236,10 +255,18 @@ function trackEditor(side, label, tracks) {
 function readTracks(side) {
   return [...view.querySelectorAll(`.tracks[data-side=${side}] .track-row`)]
     .map((row) => ({
+      no: row.querySelector('.t-no').value.trim(),
       title: row.querySelector('.t-title').value.trim(),
       artist: row.querySelector('.t-artist').value.trim(),
     }))
-    .filter((t) => t.title);
+    .filter((t) => t.title)
+    .map((t, i) => ({ ...t, no: t.no || autoTrackNo(side, i) }));
+}
+
+function renumberPlaceholders(fs) {
+  fs.querySelectorAll('.t-no').forEach((input, i) => {
+    input.placeholder = autoTrackNo(fs.dataset.side, i);
+  });
 }
 
 async function renderForm(id) {
@@ -248,7 +275,7 @@ async function renderForm(id) {
     view.innerHTML = '<p class="empty">Plak bulunamadı. <a href="#/">Listeye dön</a></p>';
     return;
   }
-  const r = existing || { sideA: [], sideB: [] };
+  const r = existing || { sideA: [], sideB: [], no: nextRecordNo(await DB.all()) };
   const images = { frontCover: r.frontCover || null, backCover: r.backCover || null };
 
   view.innerHTML = `
@@ -256,6 +283,9 @@ async function renderForm(id) {
       <a href="${id ? `#/plak/${esc(id)}` : '#/'}" class="back">‹ Vazgeç</a>
       <h1>${id ? 'Plağı düzenle' : 'Yeni plak'}</h1>
 
+      <label class="no-field">Sıra no
+        <input name="no" inputmode="numeric" value="${esc(r.no)}" autocomplete="off">
+      </label>
       <label>Sanatçı *
         <input name="artist" required value="${esc(r.artist)}" autocomplete="off">
       </label>
@@ -322,14 +352,15 @@ async function renderForm(id) {
   view.querySelectorAll('.tracks').forEach((fs) => {
     const rows = fs.querySelector('.track-rows');
     fs.querySelector('.add-track').addEventListener('click', () => {
-      rows.insertAdjacentHTML('beforeend', trackRow());
+      rows.insertAdjacentHTML('beforeend', trackRow(undefined, fs.dataset.side, rows.children.length));
       rows.lastElementChild.querySelector('.t-title').focus();
     });
     rows.addEventListener('click', (e) => {
       const btn = e.target.closest('.remove-track');
       if (!btn) return;
       btn.closest('.track-row').remove();
-      if (!rows.children.length) rows.insertAdjacentHTML('beforeend', trackRow());
+      if (!rows.children.length) rows.insertAdjacentHTML('beforeend', trackRow(undefined, fs.dataset.side, 0));
+      renumberPlaceholders(fs);
     });
     // Şarkı adında Enter formu göndermesin, alttaki alana geçsin.
     rows.addEventListener('keydown', (e) => {
@@ -355,6 +386,7 @@ async function renderForm(id) {
     }
     const record = {
       id: r.id || DB.newId(),
+      no: f.get('no').trim(),
       artist,
       album,
       year: f.get('year').trim(),
