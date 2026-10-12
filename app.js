@@ -227,6 +227,7 @@ function coverPicker(key, label, blob) {
         </label>
         <button type="button" class="btn small ghost remove" ${blob ? '' : 'hidden'}>Kaldır</button>
       </div>
+      <p class="read-status" hidden></p>
     </div>`;
 }
 
@@ -324,6 +325,7 @@ async function renderForm(id) {
     const key = picker.dataset.key;
     const preview = picker.querySelector('.preview');
     const removeBtn = picker.querySelector('.remove');
+    const status = picker.querySelector('.read-status');
 
     picker.querySelectorAll('input[type=file]').forEach((input) => {
       input.addEventListener('change', async () => {
@@ -338,7 +340,9 @@ async function renderForm(id) {
         } catch (err) {
           console.error(err);
           preview.innerHTML = '<span>Görsel okunamadı</span>';
+          return;
         }
+        readCover(key === 'frontCover' ? 'front' : 'back', images[key], status);
       });
     });
 
@@ -372,6 +376,55 @@ async function renderForm(id) {
       }
     });
   });
+
+  // Kapak fotoğrafından okunan bilgileri forma yazar. Elle girilmiş alanların
+  // üzerine yazmaz; şarkı listesi doluysa değiştirmeden önce sorar.
+  async function readCover(kind, blob, status) {
+    if (!CoverReader.hasKey()) {
+      status.textContent = 'Bilgileri kapaktan otomatik doldurmak için menüden (⋮) "Kapak okuma ayarı"nı aç.';
+      status.hidden = false;
+      return;
+    }
+    status.textContent = 'Kapak okunuyor…';
+    status.hidden = false;
+    try {
+      const info = await CoverReader.read(kind, blob);
+      const form = document.getElementById('form');
+      if (!form) return; // okuma sürerken başka ekrana geçildi
+      const filled = [];
+      [['artist', 'sanatçı'], ['album', 'albüm adı'], ['year', 'yıl'], ['label', 'plak şirketi']]
+        .forEach(([name, label]) => {
+          const input = form.elements[name];
+          const value = (info[name] || '').trim();
+          if (value && !input.value.trim()) {
+            input.value = value;
+            filled.push(label);
+          }
+        });
+      let trackCount = 0;
+      for (const side of ['sideA', 'sideB']) {
+        const tracks = (info[side] || []).filter((t) => t.title && t.title.trim());
+        if (!tracks.length) continue;
+        const fs = view.querySelector(`.tracks[data-side=${side}]`);
+        const label = side === 'sideA' ? 'A' : 'B';
+        if (readTracks(side).length &&
+            !confirm(`${label} yüzü için kapaktan ${tracks.length} şarkı okundu. Mevcut liste bununla değiştirilsin mi?`)) {
+          continue;
+        }
+        fs.querySelector('.track-rows').innerHTML = tracks
+          .map((t, i) => trackRow({ no: t.no.trim() || autoTrackNo(side, i), title: t.title.trim(), artist: t.artist.trim() }, side, i))
+          .join('');
+        trackCount += tracks.length;
+      }
+      if (trackCount) filled.push(`${trackCount} şarkı`);
+      status.textContent = filled.length
+        ? `Kapaktan dolduruldu: ${filled.join(', ')}. Kontrol etmeyi unutma.`
+        : 'Kapakta yeni bilgi bulunamadı.';
+    } catch (err) {
+      console.error(err);
+      status.textContent = `Kapak okunamadı: ${err.message}`;
+    }
+  }
 
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -425,6 +478,19 @@ const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
   reader.readAsDataURL(blob);
 });
 const dataUrlToBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
+
+menu.querySelector('[data-action=reader]').addEventListener('click', () => {
+  closeMenu();
+  const current = CoverReader.hasKey() ? ' Şu an bir anahtar kayıtlı; silmek için boş bırak.' : '';
+  const key = prompt(
+    'Kapak fotoğrafından bilgileri okumak için Anthropic API anahtarını yapıştır '
+    + '(console.anthropic.com → API Keys). Anahtar yalnızca bu cihazda saklanır.' + current,
+    '',
+  );
+  if (key === null) return;
+  CoverReader.setKey(key.trim());
+  toast(key.trim() ? 'Kapak okuma açıldı' : 'Kapak okuma kapatıldı');
+});
 
 menu.querySelector('[data-action=export]').addEventListener('click', async () => {
   closeMenu();
