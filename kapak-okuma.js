@@ -62,33 +62,51 @@ const CoverReader = (() => {
     + 'Şarkının söyleyenini yalnızca her şarkı için ayrı sanatçı yazıyorsa (karma plak) doldur, '
     + 'yoksa boş bırak. Yüzler ayrılmamışsa şarkıları sırayla A yüzüne koy.';
 
+  // Servisin döndürdüğü asıl hata metni (ör. "Your credit balance is too low…").
+  const apiMessage = (err) => err?.error?.error?.message || err?.message || '';
+  const isCreditError = (err) => err?.status === 400 && /credit balance/i.test(apiMessage(err));
+
   // kind: 'front' | 'back'. Okunan bilgileri SCHEMA biçiminde döndürür.
   async function read(kind, blob) {
     const { Anthropic, api } = await client();
     const dataUrl = await blobToDataUrl(blob);
     const [, mediaType, data] = dataUrl.match(/^data:(.+?);base64,(.*)$/);
+    const request = {
+      model: MODEL,
+      max_tokens: 16000,
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
+          { type: 'text', text: `${PROMPTS[kind]}\n\n${RULES}` },
+        ],
+      }],
+    };
     let response;
     try {
-      response = await api.beta.messages.create({
-        model: MODEL,
-        max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
-            { type: 'text', text: `${PROMPTS[kind]}\n\n${RULES}` },
-          ],
-        }],
-      });
+      try {
+        response = await api.beta.messages.create({
+          ...request,
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+        });
+      } catch (err) {
+        // Yedek model özelliği bu hesapta açık değilse onsuz bir kez daha dene.
+        if (!(err instanceof Anthropic.BadRequestError) || isCreditError(err)) throw err;
+        console.warn('Yedek modelsiz tekrar deneniyor:', apiMessage(err));
+        response = await api.messages.create(request);
+      }
     } catch (err) {
+      console.error(err);
       if (err instanceof Anthropic.AuthenticationError) throw new Error('API anahtarı geçersiz.');
       if (err instanceof Anthropic.PermissionDeniedError) throw new Error('API anahtarının bu işleme izni yok.');
       if (err instanceof Anthropic.RateLimitError) throw new Error('Çok fazla istek; biraz sonra tekrar dene.');
       if (err instanceof Anthropic.APIConnectionError) throw new Error('İnternet bağlantısı yok.');
-      if (err instanceof Anthropic.APIError) throw new Error(`Okuma servisi hata verdi (${err.status}).`);
+      if (isCreditError(err)) {
+        throw new Error('Anthropic hesabında kredi yok. console.anthropic.com → Billing kısmından kredi yükleyince çalışır.');
+      }
+      if (err instanceof Anthropic.APIError) throw new Error(`Okuma servisi hata verdi (${err.status}): ${apiMessage(err)}`);
       throw err;
     }
     if (response.stop_reason === 'refusal') throw new Error('Bu görsel okunamadı.');
