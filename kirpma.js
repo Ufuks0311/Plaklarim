@@ -5,7 +5,17 @@ const CoverCropper = (() => {
   const WORK_SIDE = 2400; // Düzeltme sırasında kullanılan en büyük kenar.
   const DETECT_SIDE = 360; // Köşe bulma bu boyuttaki küçük kopyada yapılır.
 
+  // file: Blob/File ya da kameradan gelen canvas.
   async function loadSource(file) {
+    if (file instanceof HTMLCanvasElement) {
+      const scale = Math.min(1, WORK_SIDE / Math.max(file.width, file.height));
+      if (scale === 1) return file;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(file.width * scale);
+      canvas.height = Math.round(file.height * scale);
+      canvas.getContext('2d').drawImage(file, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    }
     const url = URL.createObjectURL(file);
     try {
       const img = new Image();
@@ -434,8 +444,12 @@ const CoverCropper = (() => {
 
   const SVG = 'http://www.w3.org/2000/svg';
 
-  // Kareye oturtulmuş JPEG döndürür; vazgeçilirse null.
-  async function open(file, maxSide) {
+  const RETAKE = 'retake';
+
+  // Kareye oturtulmuş JPEG döndürür; vazgeçilirse null. onRetake verilirse
+  // "Tekrar çek" düğmesi gösterilir; basılınca onRetake() dokunma anında
+  // çağrılır ve RETAKE döner.
+  async function open(file, maxSide, { onRetake } = {}) {
     let source = await loadSource(file);
     let corners = detectCorners(source);
     const found = Boolean(corners);
@@ -453,11 +467,14 @@ const CoverCropper = (() => {
         <canvas class="cropper-loupe" width="140" height="140" hidden></canvas>
       </div>
       <div class="cropper-tools">
+        ${onRetake ? '<button type="button" class="btn small" data-act="cancel">Vazgeç</button>' : ''}
         <button type="button" class="btn small" data-act="detect">Köşeleri bul</button>
         <button type="button" class="btn small" data-act="rotate">Döndür</button>
       </div>
       <div class="cropper-actions">
-        <button type="button" class="btn" data-act="cancel">Vazgeç</button>
+        ${onRetake
+    ? '<button type="button" class="btn" data-act="retake">Tekrar çek</button>'
+    : '<button type="button" class="btn" data-act="cancel">Vazgeç</button>'}
         <button type="button" class="btn primary" data-act="ok">Kareye oturt</button>
       </div>`;
     const hint = overlay.querySelector('.cropper-hint');
@@ -481,6 +498,10 @@ const CoverCropper = (() => {
     setHint(found);
     stage.prepend(source);
     document.body.append(overlay);
+    // Geri tuşu "Vazgeç" gibi davranır (bkz. katman.js).
+    let finish;
+    const done = new Promise((resolve) => { finish = resolve; });
+    const releaseBack = Overlay.add(() => finish(null));
     document.body.classList.add('no-scroll');
 
     // Görsel sahneye sığdırılır; ds = ekran pikseli / kaynak pikseli.
@@ -576,34 +597,38 @@ const CoverCropper = (() => {
     svg.addEventListener('pointercancel', release);
     window.addEventListener('resize', layout);
 
-    const ok = await new Promise((resolve) => {
-      overlay.addEventListener('click', (e) => {
-        const act = e.target.closest('[data-act]')?.dataset.act;
-        if (act === 'cancel') resolve(false);
-        if (act === 'ok') resolve(true);
-        if (act === 'detect') {
-          const again = detectCorners(source);
-          if (again) corners = again;
-          setHint(Boolean(again));
-          draw();
-        }
-        if (act === 'rotate') {
-          const oldHeight = source.height;
-          source.remove();
-          source = rotate(source);
-          stage.prepend(source);
-          corners = orderCorners(corners.map((p) => ({ x: oldHeight - p.y, y: p.x })));
-          layout();
-        }
-      });
+    overlay.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'cancel') finish(null);
+      if (act === 'ok') finish('ok');
+      if (act === 'retake') {
+        onRetake();
+        finish(RETAKE);
+      }
+      if (act === 'detect') {
+        const again = detectCorners(source);
+        if (again) corners = again;
+        setHint(Boolean(again));
+        draw();
+      }
+      if (act === 'rotate') {
+        const oldHeight = source.height;
+        source.remove();
+        source = rotate(source);
+        stage.prepend(source);
+        corners = orderCorners(corners.map((p) => ({ x: oldHeight - p.y, y: p.x })));
+        layout();
+      }
     });
 
+    const result = await done;
+    releaseBack();
     window.removeEventListener('resize', layout);
     overlay.remove();
     document.body.classList.remove('no-scroll');
-    if (!ok) return null;
+    if (result !== 'ok') return result;
     return warp(source, corners, maxSide);
   }
 
-  return { open, detectCorners, warp };
+  return { open, detectCorners, warp, RETAKE };
 })();
