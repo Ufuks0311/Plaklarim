@@ -5,12 +5,15 @@ uygulama gibi eklenebilir ve internet olmadan da çalışır.
 
 Her plak için saklananlar:
 
-- Ön kapak ve arka kapak görseli (görsel kutusuna dokununca kamera açılır; galeriden de seçilebilir;
+- Ön kapak ve arka kapak görseli (görsel kutusuna dokununca uygulamanın kendi kamerası açılır,
+  çekilen kare onay sorulmadan köşe ekranına gelir; galeriden de seçilebilir;
   fotoğraftaki kapağın dört köşesi otomatik bulunur, eğiklik ve perspektif düzeltilerek
-  kapak tam kareye oturtulur; köşeler gerekirse elle sürüklenebilir)
+  kapak tam kareye oturtulur; köşeler gerekirse elle sürüklenebilir, beğenilmezse
+  "Tekrar çek" ile yeniden çekilir. Kamera izni verilmezse telefonun kendi kamerası kullanılır)
 - Koleksiyon sıra numarası, sanatçı, albüm adı, yıl, tür, plak şirketi
 - Plak sayısı (varsayılan 1) ve her plağın yüz yüz şarkıları: 1. plak A-B, 2. plak C-D… yüzleri;
-  her şarkı sıra numarası (A1, A2, C1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için)
+  her şarkı sıra numarası (A1, A2, C1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için).
+  Şarkılar soldaki ⠿ tutamağından sürüklenerek sıralanabilir ya da başka yüze taşınabilir
 - Notlar (baskı, durum, nereden alındığı…)
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.
