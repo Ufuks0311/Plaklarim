@@ -204,6 +204,11 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 .cropper-actions { display: flex; gap: .75rem; padding: .75rem 1rem 1rem; }
 .cropper-actions .btn { flex: 1; }
 
+.disc { margin-top: 1.25rem; }
+.disc h2, .disc-title { font-size: 1.05rem; margin: 0 0 .6rem; }
+.disc + .disc { border-top: 1px solid var(--line); padding-top: 1.25rem; }
+.disc-edit + .disc-edit { border-top: 1px solid var(--line); padding-top: 1rem; }
+#discs:not(.multi) .disc-title { display: none; }
 .form select {
   display: block; margin-top: .3rem; padding: .7rem .8rem; min-width: 6rem;
   font: inherit; font-weight: 400; color: var(--text);
