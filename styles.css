@@ -175,3 +175,4 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 }
 
 .read-status { font-size: .8rem; color: var(--muted); margin: .4rem 0 0; }
+.lookup { margin: -.25rem 0 1rem; }
