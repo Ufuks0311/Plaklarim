@@ -52,20 +52,23 @@ function discsOf(record) {
 const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 
 // Sanatçı, albüm, tür, plak şirketi ve şarkı adları/söyleyenleri "Her Kelimenin
-// İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Eski sideA/sideB
-// alanları da discs yapısına çevrilir.
+// İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Belirsiz i/ı
+// harfleri için plağın diğer adlarına bakılır; tür çoğu zaman başka dilde olduğu
+// için yalnızca kendi kelimelerine göre düzeltilir. Eski sideA/sideB alanları
+// da discs yapısına çevrilir.
+const casingContext = (artist, album, label, tracks) =>
+  TextCase.evidence([artist, album, label, ...tracks.flatMap((t) => [t.title, t.artist])]);
+
 function normalizeRecord(record) {
   const discs = discsOf(record);
-  const tracks = discs.flatMap((d) => d.sides.flat());
-  const locale = TextCase.localeFor(record.artist, record.album, record.label,
-    ...tracks.flatMap((t) => [t.title, t.artist]));
-  const tc = (text) => TextCase.title(text, locale);
+  const context = casingContext(record.artist, record.album, record.label, discs.flatMap((d) => d.sides.flat()));
+  const tc = (text) => TextCase.title(text, context);
   const { sideA, sideB, ...rest } = record;
   return {
     ...rest,
     artist: tc(record.artist),
     album: tc(record.album),
-    genre: tc(record.genre),
+    genre: TextCase.title(record.genre),
     label: tc(record.label),
     discs: discs.map((d) => ({
       sides: d.sides.map((side) => side.map((t) => ({ ...t, title: tc(t.title), artist: tc(t.artist) }))),
@@ -74,11 +77,17 @@ function normalizeRecord(record) {
 }
 
 // Daha önce kaydedilmiş plakları bu biçime getirir; değişmeyenlere dokunmaz.
+// Değişen plakların ilk halleri namesBeforeCasing alanında saklanır (yedeğe de girer).
 async function normalizeStoredRecords() {
   try {
     for (const record of await DB.all()) {
       const fixed = normalizeRecord(record);
-      if (JSON.stringify(fixed) !== JSON.stringify(record)) await DB.put(fixed);
+      if (JSON.stringify(fixed) === JSON.stringify(record)) continue;
+      if (!record.namesBeforeCasing) {
+        fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
+          .filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
+      }
+      await DB.put(fixed);
     }
   } catch (err) {
     console.error(err);
@@ -587,24 +596,38 @@ async function renderForm(id) {
   document.getElementById('lookupBtn').addEventListener('click', lookupOnline);
 
   // Ad alanları, alandan çıkınca ve kapaktan/internetten doldurulunca
-  // "Her Kelimenin İlk Harfi Büyük" biçimine getirilir.
+  // "Her Kelimenin İlk Harfi Büyük" biçimine getirilir. Her alanın yazıldığı
+  // (ya da okunduğu) hali saklanır ve bütün alanlar her seferinde bu hallerden,
+  // kayıttakiyle aynı kuralla yeniden hesaplanır; sonuç alanların dolma sırasına
+  // bağlı olmaz. Üzerinde yazılan alana, imleç kaymasın diye, ayrılınca dokunulur.
   const TEXT_FIELDS = '[name=artist], [name=album], [name=genre], [name=label], .t-title, .t-artist';
-  function formLocale() {
-    return TextCase.localeFor(...[...view.querySelectorAll(TEXT_FIELDS)].map((el) => el.value));
+  function rawText(el) {
+    if (el.value !== el.dataset.cased) el.dataset.raw = el.value;
+    return el.dataset.raw;
   }
-  function normalizeFormText(only) {
-    const locale = formLocale();
-    (only ? [only] : view.querySelectorAll(TEXT_FIELDS)).forEach((el) => {
-      const fixed = TextCase.title(el.value, locale);
-      if (fixed !== el.value) el.value = fixed;
+  function normalizeFormText(skip = document.activeElement) {
+    const form = document.getElementById('form');
+    const field = (name) => rawText(form.elements[name]);
+    const tracks = [...view.querySelectorAll('.track-row')].map((row) => ({
+      title: rawText(row.querySelector('.t-title')),
+      artist: rawText(row.querySelector('.t-artist')),
+    }));
+    const context = casingContext(field('artist'), field('album'), field('label'), tracks);
+    view.querySelectorAll(TEXT_FIELDS).forEach((el) => {
+      const cased = TextCase.title(rawText(el), el.name === 'genre' ? undefined : context);
+      if (el === skip) return;
+      el.dataset.cased = cased;
+      if (el.value !== cased) el.value = cased;
     });
   }
   document.getElementById('form').addEventListener('change', (e) => {
-    if (e.target.matches(TEXT_FIELDS)) normalizeFormText(e.target);
+    if (!e.target.matches(TEXT_FIELDS)) return;
+    normalizeFormText(document.activeElement === e.target ? null : document.activeElement);
   });
 
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    normalizeFormText(null);
     const f = new FormData(e.target);
     const artist = f.get('artist').trim();
     const album = f.get('album').trim();
@@ -628,6 +651,7 @@ async function renderForm(id) {
       backCover: images.backCover,
       createdAt: r.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      ...(r.namesBeforeCasing && { namesBeforeCasing: r.namesBeforeCasing }),
     });
     await DB.put(record);
     toast('Kaydedildi');

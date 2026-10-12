@@ -17,8 +17,11 @@ Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir
 
 Sanatçı, albüm, tür, plak şirketi ve şarkı adları her kelimenin ilk harfi büyük,
 gerisi küçük olacak biçimde saklanır (ör. "BARIŞ MANÇO" → "Barış Manço"); notlar
-olduğu gibi kalır. Türkçe harf içeren adlarda i/İ ve ı/I Türkçe kurallarıyla çevrilir.
-Daha önce kaydedilmiş plaklar uygulama açılınca bu biçime getirilir.
+olduğu gibi kalır. Büyük harfle yazılmış adlardaki I harfinin ı mı i mi olacağı
+kelimenin kendisine, plağın diğer adlarına ve Türkçe ses uyumuna bakılarak seçilir
+("KADIN" → "Kadın", "BILLIE JEAN" → "Billie Jean"). Daha önce kaydedilmiş plaklar
+uygulama açılınca bu biçime getirilir; ilk halleri yedek dosyasında da duran
+`namesBeforeCasing` alanında saklanır.
 
 ## Kapaktan otomatik doldurma
 

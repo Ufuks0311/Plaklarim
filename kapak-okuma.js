@@ -66,6 +66,9 @@ const CoverReader = (() => {
       + 'yüz yüz ayrı çıkar; görünüyorsa sanatçı, albüm adı, yıl ve plak şirketini de ekle.',
   };
   const RULES = 'Kurallar: Yazıları kapakta göründüğü gibi, Türkçe karakterleri koruyarak yaz. '
+    + 'Sanatçı, albüm, plak şirketi ve şarkı adlarında her kelimenin ilk harfi büyük, gerisi küçük olsun '
+    + '(kapakta hepsi büyük harfle yazsa bile); Türkçe kelimelerde ı/i ve I/İ harflerini doğru seç '
+    + '(KADIN → Kadın, İSTANBUL → İstanbul), yabancı kelimeleri kendi dillerinin harfleriyle yaz (BILLIE → Billie). '
     + 'Görünmeyen ya da emin olmadığın alanları boş bırak, tahmin etme. '
     + 'Şarkı numarasını kapakta yazdığı gibi yaz (A1, B2, 1, 2…); yazmıyorsa boş bırak. '
     + 'Şarkının söyleyenini yalnızca her şarkı için ayrı sanatçı yazıyorsa (karma plak) doldur, '
