@@ -152,11 +152,24 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 .hint { color: var(--muted); font-size: .85rem; margin: 0 0 .75rem; }
 .tracks { border: 1px solid var(--line); border-radius: var(--radius); padding: .75rem; margin: 0 0 1rem; background: var(--surface); }
 .tracks legend { font-weight: 600; font-size: .9rem; padding: 0 .25rem; }
-.track-rows { margin: 0 0 .5rem; padding-left: 1.6rem; }
-.track-row { display: grid; grid-template-columns: 1fr auto; gap: .3rem; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+.track-rows { list-style: none; margin: 0 0 .5rem; padding: 0; }
+.track-row { display: grid; grid-template-columns: 3.4rem 1fr auto; gap: .3rem; padding: .5rem 0; border-bottom: 1px solid var(--line); }
 .track-row:last-child { border-bottom: 0; }
-.form .track-row input { margin: 0; padding: .55rem .7rem; grid-column: 1; }
-.track-row .t-artist { font-size: .9rem; }
-.track-row .remove-track { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--muted); }
+.form .track-row input { margin: 0; padding: .55rem .6rem; }
+.form .track-row .t-no { grid-column: 1; grid-row: 1; text-align: center; }
+.track-row .t-title { grid-column: 2; grid-row: 1; }
+.track-row .t-artist { grid-column: 2; grid-row: 2; font-size: .9rem; }
+.track-row .remove-track { grid-column: 3; grid-row: 1 / span 2; align-self: center; color: var(--muted); }
+.form .no-field input { max-width: 8rem; }
+.tracklist { list-style: none; margin: 0; padding: 0; }
+.tracklist li { display: flex; gap: .75rem; padding: .25rem 0; }
+.track-no { color: var(--muted); min-width: 2rem; font-variant-numeric: tabular-nums; }
 .side .track-title { display: block; }
 .side .track-artist { display: block; color: var(--muted); font-size: .85rem; }
+.record-no { color: var(--accent); font-weight: 600; margin: 0; }
+.card { position: relative; }
+.card .badge {
+  position: absolute; top: .4rem; left: .4rem;
+  background: rgb(0 0 0 / .7); color: #fff; font-size: .8rem; font-weight: 600;
+  padding: .1rem .5rem; border-radius: 999px;
+}
