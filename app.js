@@ -54,12 +54,12 @@ const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 // Sanatçı, albüm, tür, plak şirketi ve şarkı adları/söyleyenleri "Her Kelimenin
 // İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Belirsiz i/ı
 // harfleri için plağın diğer adlarına bakılır. Plak şirketi (Philips, Columbia)
-// ve tür çoğu zaman yabancı olduğundan plağın adlarını etkilemez; kendi
-// kelimelerine göre, ipucu yoksa yabancı ad gibi düzeltilir. Eski sideA/sideB
-// alanları da discs yapısına çevrilir.
+// ve tür plağın adlarını etkilemez, kendi kelimelerine göre düzeltilir; plak
+// şirketinde ipucu yoksa yabancı ad sayılır. Eski sideA/sideB alanları da
+// discs yapısına çevrilir.
 const casingContext = (artist, album, tracks) =>
   TextCase.evidence([artist, album, ...tracks.flatMap((t) => [t.title, t.artist])]);
-const caseBrand = (text) => TextCase.title(text, TextCase.FOREIGN_NAME);
+const caseLabel = (text) => TextCase.title(text, TextCase.FOREIGN_NAME);
 
 function normalizeRecord(record) {
   const discs = discsOf(record);
@@ -70,8 +70,8 @@ function normalizeRecord(record) {
     ...rest,
     artist: tc(record.artist),
     album: tc(record.album),
-    genre: caseBrand(record.genre),
-    label: caseBrand(record.label),
+    genre: TextCase.title(record.genre),
+    label: caseLabel(record.label),
     discs: discs.map((d) => ({
       sides: d.sides.map((side) => side.map((t) => ({ ...t, title: tc(t.title), artist: tc(t.artist) }))),
     })),
@@ -617,7 +617,8 @@ async function renderForm(id) {
     const context = casingContext(field('artist'), field('album'), tracks);
     view.querySelectorAll(TEXT_FIELDS).forEach((el) => {
       const raw = rawText(el);
-      const cased = el.name === 'genre' || el.name === 'label' ? caseBrand(raw) : TextCase.title(raw, context);
+      const cased = el.name === 'genre' ? TextCase.title(raw)
+        : el.name === 'label' ? caseLabel(raw) : TextCase.title(raw, context);
       if (el === skip) return;
       el.dataset.cased = cased;
       if (el.value !== cased) el.value = cased;
