@@ -193,26 +193,6 @@ async function renderDetail(id) {
 
 // ---------- Form ----------
 
-// Fotoğrafı makul bir boyuta küçültüp JPEG'e çevirir; telefon fotoğrafları
-// birkaç MB olduğundan veritabanını şişirmemek için gerekli.
-async function shrinkImage(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
-    if (scale === 1 && file.type === 'image/jpeg') return file;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.naturalWidth * scale);
-    canvas.height = Math.round(img.naturalHeight * scale);
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 function coverPicker(key, label, blob) {
   return `
     <div class="cover-picker" data-key="${key}">
@@ -338,9 +318,11 @@ async function renderForm(id) {
         const file = input.files[0];
         input.value = '';
         if (!file) return;
-        preview.innerHTML = '<span>Hazırlanıyor…</span>';
         try {
-          images[key] = await shrinkImage(file);
+          // Fotoğraf kare çerçeveye kırpılır; vazgeçilirse önceki görsel kalır.
+          const cropped = await CoverCropper.open(file, MAX_IMAGE_SIDE);
+          if (!cropped) return;
+          images[key] = cropped;
           preview.innerHTML = `<img src="${blobUrl(images[key])}" alt="">`;
           removeBtn.hidden = false;
         } catch (err) {

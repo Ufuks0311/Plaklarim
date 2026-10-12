@@ -5,7 +5,8 @@ uygulama gibi eklenebilir ve internet olmadan da çalışır.
 
 Her plak için saklananlar:
 
-- Ön kapak ve arka kapak görseli (telefonun kamerasıyla çekilebilir ya da galeriden seçilebilir)
+- Ön kapak ve arka kapak görseli (telefonun kamerasıyla çekilebilir ya da galeriden seçilebilir;
+  seçilen fotoğraf açılan ekranda sürüklenip büyütülerek kare çerçeveye kırpılır)
 - Koleksiyon sıra numarası, sanatçı, albüm adı, yıl, tür, plak şirketi
 - A yüzü ve B yüzü şarkıları; her şarkı sıra numarası (A1, A2, B1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için)
 - Notlar (baskı, durum, nereden alındığı…)
@@ -44,7 +45,7 @@ Bu yüzden ara sıra sağ üstteki **⋮ → Yedeği indir** ile yedek al. Yedek
 tüm plakları ve kapak görsellerini içerir; telefon değiştirdiğinde ya da
 tarayıcı verisini sildiğinde **⋮ → Yedekten geri yükle** ile geri alırsın.
 
-Telefon fotoğrafları kaydedilirken en uzun kenarı 1600 piksele küçültülür,
+Kırpılan kapaklar kaydedilirken en fazla 1600×1600 piksele küçültülür,
 böylece yüzlerce plak bile az yer kaplar.
 
 ## Telefona kurulum
