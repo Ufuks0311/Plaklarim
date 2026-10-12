@@ -175,6 +175,9 @@ async function renderDetail(id) {
     }).join('');
 
   const discs = discsOf(r);
+  // Ek plakların yüzleri (C, D…) albümün devamı olarak A ve B'nin ardından sıralanır.
+  const sidesHtml = discs.flatMap((d, di) =>
+    d.sides.map((tracks, si) => trackList(`${sideLetter(di, si)} yüzü`, tracks, r.artist))).join('');
   const meta = [['Yıl', r.year], ['Plak şirketi', r.label], ['Tür', r.genre],
     ['Plak sayısı', discs.length > 1 ? String(discs.length) : '']]
     .filter(([, v]) => v)
@@ -188,14 +191,7 @@ async function renderDetail(id) {
       <p class="artist">${esc(r.artist)}</p>
       ${covers ? `<div class="covers">${covers}</div>` : ''}
       ${meta ? `<dl class="meta">${meta}</dl>` : ''}
-      ${discs.map((d, di) => {
-        const sides = d.sides.map((tracks, si) => trackList(`${sideLetter(di, si)} yüzü`, tracks, r.artist)).join('');
-        if (discs.length === 1) return sides ? `<div class="sides">${sides}</div>` : '';
-        return `<section class="disc">
-          <h2>${di + 1}. plak</h2>
-          ${sides ? `<div class="sides">${sides}</div>` : '<p class="hint">Şarkı girilmemiş.</p>'}
-        </section>`;
-      }).join('')}
+      ${sidesHtml ? `<div class="sides">${sidesHtml}</div>` : ''}
       ${r.notes ? `<section class="notes"><h3>Notlar</h3><p>${esc(r.notes)}</p></section>` : ''}
       <div class="actions">
         <a href="#/duzenle/${esc(r.id)}" class="btn primary">Düzenle</a>
@@ -259,7 +255,6 @@ function trackEditor(letter, tracks) {
 function discEditor(disc, di) {
   return `
     <div class="disc-edit" data-disc="${di}">
-      <h2 class="disc-title">${di + 1}. plak</h2>
       ${disc.sides.map((tracks, si) => trackEditor(sideLetter(di, si), tracks)).join('')}
     </div>`;
 }
@@ -358,9 +353,9 @@ async function renderForm(id) {
       <label class="disc-count">Plak sayısı
         <select name="discCount">${Array.from({ length: MAX_DISCS }, (_, i) => `<option value="${i + 1}"${i + 1 === discs.length ? ' selected' : ''}>${i + 1}</option>`).join('')}</select>
       </label>
-      <p class="hint">Albüm birden fazla plaktan oluşuyorsa plak sayısını seç; her plağın yüzleri (A-B, C-D…) ayrı listelenir.
+      <p class="hint">Albüm birden fazla plaktan oluşuyorsa plak sayısını seç; C-D, E-F… yüzleri listeye eklenir.
         Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.</p>
-      <div id="discs" class="${discs.length > 1 ? 'multi' : ''}">${discs.map(discEditor).join('')}</div>
+      <div id="discs">${discs.map(discEditor).join('')}</div>
       <label>Notlar
         <textarea name="notes" rows="3" placeholder="Baskı, durum, nereden alındığı…">${esc(r.notes)}</textarea>
       </label>
@@ -437,7 +432,8 @@ async function renderForm(id) {
     if (count < current.length) {
       const dropped = [...current].slice(count);
       const filled = dropped.filter((el) => [...el.querySelectorAll('.tracks')].some((fs) => readTracks(fs).length));
-      if (filled.length && !confirm(`${filled.map((el) => `${Number(el.dataset.disc) + 1}. plak`).join(', ')} şarkılarıyla birlikte silinsin mi?`)) {
+      const letters = filled.flatMap((el) => [...el.querySelectorAll('.tracks')].map((fs) => fs.dataset.side));
+      if (filled.length && !confirm(`${letters.join(', ')} yüzleri şarkılarıyla birlikte silinsin mi?`)) {
         discCount.value = String(current.length);
         return false;
       }
@@ -447,7 +443,6 @@ async function renderForm(id) {
       discsEl.insertAdjacentHTML('beforeend', discEditor({ sides: [[], []] }, di));
       discsEl.lastElementChild.querySelectorAll('.tracks').forEach(wireTrackEditor);
     }
-    discsEl.classList.toggle('multi', count > 1);
     discCount.value = String(count);
     return true;
   }

@@ -9,8 +9,8 @@ Her plak için saklananlar:
   fotoğraftaki kapağın dört köşesi otomatik bulunur, eğiklik ve perspektif düzeltilerek
   kapak tam kareye oturtulur; köşeler gerekirse elle sürüklenebilir)
 - Koleksiyon sıra numarası, sanatçı, albüm adı, yıl, tür, plak şirketi
-- Plak sayısı (varsayılan 1) ve her plağın yüz yüz şarkıları: 1. plak A-B, 2. plak C-D… yüzleri;
-  her şarkı sıra numarası (A1, A2, C1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için)
+- Plak sayısı (varsayılan 1) ve yüz yüz şarkılar: tek listede A, B, C, D… yüzleri
+  (ek plakların yüzleri albümün devamı olarak eklenir); her şarkı sıra numarası (A1, A2, C1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için)
 - Notlar (baskı, durum, nereden alındığı…)
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.
