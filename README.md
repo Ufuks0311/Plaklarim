@@ -29,10 +29,11 @@ böylece yüzlerce plak bile az yer kaplar.
 
 Uygulama GitHub Pages üzerinden ücretsiz yayınlanır:
 
-1. Depoda **Settings → Pages → Build and deployment → Source** alanını
-   **GitHub Actions** yap.
-2. `main` dalına her gönderimde uygulama otomatik yayınlanır. Adres
-   `https://<kullanıcı-adı>.github.io/<depo-adı>/` olur.
+1. Depoda **Settings → Pages → Build and deployment** bölümünde **Source**
+   alanını **Deploy from a branch**, **Branch** alanını **main** ve **/ (root)**
+   yapıp **Save**'e bas.
+2. Bir iki dakika içinde uygulama `https://<kullanıcı-adı>.github.io/<depo-adı>/`
+   adresinde yayınlanır; `main` dalına her gönderimde kendiliğinden güncellenir.
 3. Adresi telefonda aç:
    - **iPhone (Safari):** Paylaş → Ana Ekrana Ekle
    - **Android (Chrome):** ⋮ → Ana ekrana ekle / Uygulamayı yükle
