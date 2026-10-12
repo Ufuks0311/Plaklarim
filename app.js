@@ -213,7 +213,7 @@ async function renderDetail(id) {
 
 // ---------- Form ----------
 
-// Görsel kutusuna dokunmak "Fotoğraf çek" düğmesiyle aynı işi yapar.
+// Görsel kutusuna dokununca kamera açılır.
 const EMPTY_COVER = 'Fotoğraf çekmek için dokun';
 
 function coverPicker(key, label, blob) {
@@ -221,10 +221,8 @@ function coverPicker(key, label, blob) {
     <div class="cover-picker" data-key="${key}">
       <span class="label">${label}</span>
       <label class="preview" for="${key}-camera" aria-label="${label}: fotoğraf çek">${blob ? `<img src="${blobUrl(blob)}" alt="">` : `<span>${EMPTY_COVER}</span>`}</label>
+      <input type="file" id="${key}-camera" accept="image/*" capture="environment" hidden>
       <div class="picker-buttons">
-        <label class="btn small">Fotoğraf çek
-          <input type="file" id="${key}-camera" accept="image/*" capture="environment" hidden>
-        </label>
         <label class="btn small">Galeriden seç
           <input type="file" accept="image/*" hidden>
         </label>
