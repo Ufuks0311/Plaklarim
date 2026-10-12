@@ -15,6 +15,11 @@ Her plak için saklananlar:
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.
 
+Sanatçı, albüm, tür, plak şirketi ve şarkı adları her kelimenin ilk harfi büyük,
+gerisi küçük olacak biçimde saklanır (ör. "BARIŞ MANÇO" → "Barış Manço"); notlar
+olduğu gibi kalır. Türkçe harf içeren adlarda i/İ ve ı/I Türkçe kurallarıyla çevrilir.
+Daha önce kaydedilmiş plaklar uygulama açılınca bu biçime getirilir.
+
 ## Kapaktan otomatik doldurma
 
 Ön kapak fotoğrafı yüklenince sanatçı ve albüm adı, arka kapak fotoğrafı
