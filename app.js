@@ -54,16 +54,48 @@ function discsOf(record) {
 const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 
 // Sanatçı, albüm, tür, plak şirketi ve şarkı adları/söyleyenleri "Her Kelimenin
-// İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Belirsiz i/ı
-// harfleri için plağın diğer adlarına bakılır. Plak şirketi (Philips, Columbia)
-// ve tür plağın adlarını etkilemez, kendi kelimelerine göre düzeltilir; plak
-// şirketinde ipucu yoksa yabancı ad sayılır. Eski sideA/sideB alanları da
-// discs yapısına çevrilir.
+// İlk Harfi Büyük" biçiminde saklanır: yabancı plaklarda İngilizce, yerli
+// plaklarda Türkçe kurallarla (bkz. buyuk-harf.js). Notlar olduğu gibi kalır.
+// Plağın dili ve belirsiz i/ı harfleri için plağın diğer adlarına bakılır. Plak
+// şirketi (Philips, Columbia) ve tür plağın adlarını etkilemez, kendi kelimelerine
+// göre düzeltilir; plak şirketinde ipucu yoksa yabancı ad sayılır. Eski
+// sideA/sideB alanları da discs yapısına çevrilir.
 const casingContext = (artist, album, tracks) =>
   TextCase.evidence([artist, album, ...tracks.flatMap((t) => [t.title, t.artist])]);
 const caseLabel = (text) => TextCase.title(text, TextCase.FOREIGN_NAME);
 
-function normalizeRecord(record) {
+// Yazım kuralları değişince sürüm artar; eski sürümle düzeltilmiş plaklar
+// adların ilk hallerinden (namesBeforeCasing) yeniden düzeltilir.
+const CASING_VERSION = 2;
+// Büyük-küçük harf ve ı/i farkı dışında aynı yazı mı? (KADIN, Kadin)
+const sameText = (a, b) => typeof a === 'string' && typeof b === 'string'
+  && a.replace(/[ıİI]/g, 'i').toLowerCase() === b.replace(/[ıİI]/g, 'i').toLowerCase();
+
+// Eski sürümle düzeltilmiş plakta, sonradan elle değiştirilmemiş adların ilk
+// halleri; eski kuralın yanlış seçtiği ı/i (Kadin) böylece yeniden hesaplanır.
+// Elle değiştirilmiş adlar olduğu gibi alınır.
+function casingSource(record) {
+  const before = record.namesBeforeCasing;
+  if (!before || (record.casingVersion || 0) >= CASING_VERSION) return record;
+  const pick = (now, then) => (sameText(now, then) ? then : now);
+  const oldDiscs = discsOf(before);
+  return {
+    ...record,
+    artist: pick(record.artist, before.artist),
+    album: pick(record.album, before.album),
+    genre: pick(record.genre, before.genre),
+    label: pick(record.label, before.label),
+    discs: discsOf(record).map((d, di) => ({
+      sides: d.sides.map((side, si) => side.map((t, i) => {
+        const old = oldDiscs[di]?.sides[si][i];
+        return old ? { ...t, title: pick(t.title, old.title), artist: pick(t.artist, old.artist) } : t;
+      })),
+    })),
+  };
+}
+
+function normalizeRecord(input) {
+  const record = casingSource(input);
   const discs = discsOf(record);
   const context = casingContext(record.artist, record.album, discs.flatMap((d) => d.sides.flat()));
   const tc = (text) => TextCase.title(text, context);
@@ -77,6 +109,7 @@ function normalizeRecord(record) {
     discs: discs.map((d) => ({
       sides: d.sides.map((side) => side.map((t) => ({ ...t, title: tc(t.title), artist: tc(t.artist) }))),
     })),
+    casingVersion: CASING_VERSION,
   };
 }
 
@@ -84,10 +117,11 @@ function normalizeRecord(record) {
 // Değişen plakların ilk halleri namesBeforeCasing alanında saklanır (yedeğe de girer).
 async function normalizeStoredRecords() {
   try {
+    const names = (r) => JSON.stringify([r.artist, r.album, r.genre, r.label, discsOf(r)]);
     for (const record of await DB.all()) {
       const fixed = normalizeRecord(record);
       if (JSON.stringify(fixed) === JSON.stringify(record)) continue;
-      if (!record.namesBeforeCasing) {
+      if (!record.namesBeforeCasing && names(fixed) !== names(record)) {
         fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
           .filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
       }
@@ -833,6 +867,7 @@ async function renderForm(id) {
       createdAt: r.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...(r.namesBeforeCasing && { namesBeforeCasing: r.namesBeforeCasing }),
+      casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
     await DB.put(record);
     toast('Kaydedildi');

@@ -21,12 +21,17 @@ Her plak için saklananlar:
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.
 
 Sanatçı, albüm, tür, plak şirketi ve şarkı adları her kelimenin ilk harfi büyük,
-gerisi küçük olacak biçimde saklanır (ör. "BARIŞ MANÇO" → "Barış Manço"); notlar
-olduğu gibi kalır. Büyük harfle yazılmış adlardaki I harfinin ı mı i mi olacağı
-kelimenin kendisine, plağın diğer adlarına ve Türkçe ses uyumuna bakılarak seçilir
-("KADIN" → "Kadın", "BILLIE JEAN" → "Billie Jean"). Daha önce kaydedilmiş plaklar
-uygulama açılınca bu biçime getirilir; ilk halleri yedek dosyasında da duran
-`namesBeforeCasing` alanında saklanır.
+gerisi küçük olacak biçimde saklanır; notlar olduğu gibi kalır. Yabancı plaklar
+İngilizce kurallarla yazılır: a, the, and, of, in, on, to gibi kısa kelimeler küçük
+kalır ("THE DARK SIDE OF THE MOON" → "The Dark Side of the Moon"). Yerli plaklar
+Türkçe kurallarla yazılır: ve, ile, ya, ki, de/da ve mı/mi küçük kalır, I harfinin
+ı mı i mi olacağı Türkçe sözlükten ve ses uyumundan bulunur ("YALNIZ KADIN" →
+"Yalnız Kadın", "HAZIR MISIN" → "Hazır mısın"). Plağın yerli mi yabancı mı olduğu
+sanatçı, albüm ve şarkı adlarına bakılarak anlaşılır; yerli plaktaki İngilizce bir
+şarkı adı İngilizce kurallarla yazılır. Daha önce kaydedilmiş plaklar uygulama
+açılınca bu biçime getirilir; ilk halleri yedek dosyasında da duran
+`namesBeforeCasing` alanında saklanır ve kurallar değişince adlar bu ilk hallerinden
+yeniden düzeltilir.
 
 ## Kapaktan otomatik doldurma
 
