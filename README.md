@@ -5,7 +5,7 @@ uygulama gibi eklenebilir ve internet olmadan da çalışır.
 
 Her plak için saklananlar:
 
-- Ön kapak ve arka kapak görseli (telefonun kamerasıyla çekilebilir ya da galeriden seçilebilir;
+- Ön kapak ve arka kapak görseli (görsel kutusuna dokununca kamera açılır; galeriden de seçilebilir;
   fotoğraftaki kapağın dört köşesi otomatik bulunur, eğiklik ve perspektif düzeltilerek
   kapak tam kareye oturtulur; köşeler gerekirse elle sürüklenebilir)
 - Koleksiyon sıra numarası, sanatçı, albüm adı, yıl, tür, plak şirketi

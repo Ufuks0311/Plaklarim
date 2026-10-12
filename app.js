@@ -193,14 +193,17 @@ async function renderDetail(id) {
 
 // ---------- Form ----------
 
+// Görsel kutusuna dokunmak "Fotoğraf çek" düğmesiyle aynı işi yapar.
+const EMPTY_COVER = 'Fotoğraf çekmek için dokun';
+
 function coverPicker(key, label, blob) {
   return `
     <div class="cover-picker" data-key="${key}">
       <span class="label">${label}</span>
-      <div class="preview">${blob ? `<img src="${blobUrl(blob)}" alt="">` : '<span>Görsel yok</span>'}</div>
+      <label class="preview" for="${key}-camera" aria-label="${label}: fotoğraf çek">${blob ? `<img src="${blobUrl(blob)}" alt="">` : `<span>${EMPTY_COVER}</span>`}</label>
       <div class="picker-buttons">
         <label class="btn small">Fotoğraf çek
-          <input type="file" accept="image/*" capture="environment" hidden>
+          <input type="file" id="${key}-camera" accept="image/*" capture="environment" hidden>
         </label>
         <label class="btn small">Galeriden seç
           <input type="file" accept="image/*" hidden>
@@ -336,7 +339,7 @@ async function renderForm(id) {
 
     removeBtn.addEventListener('click', () => {
       images[key] = null;
-      preview.innerHTML = '<span>Görsel yok</span>';
+      preview.innerHTML = `<span>${EMPTY_COVER}</span>`;
       removeBtn.hidden = true;
     });
   });
