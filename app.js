@@ -26,6 +26,14 @@ function toast(message) {
   toast.timer = setTimeout(() => { el.hidden = true; }, 2500);
 }
 
+// Şarkılar { title, artist } nesneleri olarak saklanır. İlk sürümde düz metin
+// olarak kaydedilmiş şarkılar okunurken bu yapıya çevrilir.
+function tracksOf(record, side) {
+  return (record[side] || []).map((t) => (typeof t === 'string'
+    ? { title: t, artist: '' }
+    : { title: t.title || '', artist: t.artist || '' }));
+}
+
 const collator = new Intl.Collator('tr', { sensitivity: 'base' });
 const byArtistThenAlbum = (a, b) =>
   collator.compare(a.artist, b.artist) || collator.compare(a.album, b.album);
@@ -85,7 +93,7 @@ async function renderList() {
     lastQuery = q.value;
     const shown = term
       ? records.filter((r) => [r.artist, r.album, r.label, r.genre, r.year,
-          ...(r.sideA || []), ...(r.sideB || [])]
+          ...[...tracksOf(r, 'sideA'), ...tracksOf(r, 'sideB')].flatMap((t) => [t.title, t.artist])]
           .join('\n').toLocaleLowerCase('tr').includes(term))
       : records;
     count.textContent = term
@@ -109,12 +117,15 @@ async function renderList() {
 
 // ---------- Detay ----------
 
-function trackList(title, tracks) {
-  if (!tracks || !tracks.length) return '';
+function trackList(title, tracks, albumArtist) {
+  if (!tracks.length) return '';
   return `
     <section class="side">
       <h3>${title}</h3>
-      <ol>${tracks.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+      <ol>${tracks.map((t) => `<li>
+        <span class="track-title">${esc(t.title)}</span>
+        ${t.artist && t.artist !== albumArtist ? `<span class="track-artist">${esc(t.artist)}</span>` : ''}
+      </li>`).join('')}</ol>
     </section>`;
 }
 
@@ -147,8 +158,8 @@ async function renderDetail(id) {
       ${covers ? `<div class="covers">${covers}</div>` : ''}
       ${meta ? `<dl class="meta">${meta}</dl>` : ''}
       <div class="sides">
-        ${trackList('A yüzü', r.sideA)}
-        ${trackList('B yüzü', r.sideB)}
+        ${trackList('A yüzü', tracksOf(r, 'sideA'), r.artist)}
+        ${trackList('B yüzü', tracksOf(r, 'sideB'), r.artist)}
       </div>
       ${r.notes ? `<section class="notes"><h3>Notlar</h3><p>${esc(r.notes)}</p></section>` : ''}
       <div class="actions">
@@ -204,7 +215,32 @@ function coverPicker(key, label, blob) {
     </div>`;
 }
 
-const linesOf = (text) => text.split('\n').map((l) => l.trim()).filter(Boolean);
+function trackRow(t = { title: '', artist: '' }) {
+  return `
+    <li class="track-row">
+      <input class="t-title" placeholder="Şarkı adı" value="${esc(t.title)}" autocomplete="off" aria-label="Şarkı adı">
+      <input class="t-artist" placeholder="Söyleyen (boşsa albüm sanatçısı)" value="${esc(t.artist)}" autocomplete="off" aria-label="Söyleyen">
+      <button type="button" class="icon-btn remove-track" aria-label="Şarkıyı sil">×</button>
+    </li>`;
+}
+
+function trackEditor(side, label, tracks) {
+  return `
+    <fieldset class="tracks" data-side="${side}">
+      <legend>${label}</legend>
+      <ol class="track-rows">${(tracks.length ? tracks : [undefined]).map(trackRow).join('')}</ol>
+      <button type="button" class="btn small add-track">+ Şarkı ekle</button>
+    </fieldset>`;
+}
+
+function readTracks(side) {
+  return [...view.querySelectorAll(`.tracks[data-side=${side}] .track-row`)]
+    .map((row) => ({
+      title: row.querySelector('.t-title').value.trim(),
+      artist: row.querySelector('.t-artist').value.trim(),
+    }))
+    .filter((t) => t.title);
+}
 
 async function renderForm(id) {
   const existing = id ? await DB.get(id) : null;
@@ -243,12 +279,9 @@ async function renderForm(id) {
         ${coverPicker('backCover', 'Arka kapak', images.backCover)}
       </div>
 
-      <label>A yüzü şarkıları <small>(her satıra bir şarkı)</small>
-        <textarea name="sideA" rows="6">${esc((r.sideA || []).join('\n'))}</textarea>
-      </label>
-      <label>B yüzü şarkıları <small>(her satıra bir şarkı)</small>
-        <textarea name="sideB" rows="6">${esc((r.sideB || []).join('\n'))}</textarea>
-      </label>
+      <p class="hint">Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.</p>
+      ${trackEditor('sideA', 'A yüzü', tracksOf(r, 'sideA'))}
+      ${trackEditor('sideB', 'B yüzü', tracksOf(r, 'sideB'))}
       <label>Notlar
         <textarea name="notes" rows="3" placeholder="Baskı, durum, nereden alındığı…">${esc(r.notes)}</textarea>
       </label>
@@ -286,6 +319,29 @@ async function renderForm(id) {
     });
   });
 
+  view.querySelectorAll('.tracks').forEach((fs) => {
+    const rows = fs.querySelector('.track-rows');
+    fs.querySelector('.add-track').addEventListener('click', () => {
+      rows.insertAdjacentHTML('beforeend', trackRow());
+      rows.lastElementChild.querySelector('.t-title').focus();
+    });
+    rows.addEventListener('click', (e) => {
+      const btn = e.target.closest('.remove-track');
+      if (!btn) return;
+      btn.closest('.track-row').remove();
+      if (!rows.children.length) rows.insertAdjacentHTML('beforeend', trackRow());
+    });
+    // Şarkı adında Enter formu göndermesin, alttaki alana geçsin.
+    rows.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.matches('input')) {
+        e.preventDefault();
+        const inputs = [...fs.querySelectorAll('input')];
+        const next = inputs[inputs.indexOf(e.target) + 1];
+        if (next) next.focus(); else fs.querySelector('.add-track').click();
+      }
+    });
+  });
+
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -305,8 +361,8 @@ async function renderForm(id) {
       genre: f.get('genre').trim(),
       label: f.get('label').trim(),
       notes: f.get('notes').trim(),
-      sideA: linesOf(f.get('sideA')),
-      sideB: linesOf(f.get('sideB')),
+      sideA: readTracks('sideA'),
+      sideB: readTracks('sideB'),
       frontCover: images.frontCover,
       backCover: images.backCover,
       createdAt: r.createdAt || new Date().toISOString(),

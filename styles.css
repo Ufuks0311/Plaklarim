@@ -148,3 +148,15 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
   padding: .6rem 1.1rem; border-radius: 999px; font-size: .9rem;
   max-width: calc(100% - 2rem);
 }
+
+.hint { color: var(--muted); font-size: .85rem; margin: 0 0 .75rem; }
+.tracks { border: 1px solid var(--line); border-radius: var(--radius); padding: .75rem; margin: 0 0 1rem; background: var(--surface); }
+.tracks legend { font-weight: 600; font-size: .9rem; padding: 0 .25rem; }
+.track-rows { margin: 0 0 .5rem; padding-left: 1.6rem; }
+.track-row { display: grid; grid-template-columns: 1fr auto; gap: .3rem; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+.track-row:last-child { border-bottom: 0; }
+.form .track-row input { margin: 0; padding: .55rem .7rem; grid-column: 1; }
+.track-row .t-artist { font-size: .9rem; }
+.track-row .remove-track { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--muted); }
+.side .track-title { display: block; }
+.side .track-artist { display: block; color: var(--muted); font-size: .85rem; }
