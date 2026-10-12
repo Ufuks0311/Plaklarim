@@ -9,6 +9,9 @@ const Overlay = (() => {
   function closeAll() {
     [...open].forEach((close) => close());
   }
+  // Katman açıkken sayfa yenilendiyse geçmişte kalan fazladan adım geri alınır;
+  // yoksa geri tuşuna ilk basış hiçbir şey yapmıyormuş gibi görünür.
+  if (history.state?.plaklarimOverlay) history.back();
   window.addEventListener('popstate', () => { if (open.size) closeAll(); });
   window.addEventListener('hashchange', () => { if (open.size) closeAll(); });
 

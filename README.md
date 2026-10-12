@@ -14,7 +14,8 @@ Her plak için saklananlar:
 - Koleksiyon sıra numarası, sanatçı, albüm adı, yıl, tür, plak şirketi
 - Plak sayısı (varsayılan 1) ve her plağın yüz yüz şarkıları: 1. plak A-B, 2. plak C-D… yüzleri;
   her şarkı sıra numarası (A1, A2, C1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için).
-  Şarkılar soldaki ⠿ tutamağından sürüklenerek sıralanabilir ya da başka yüze taşınabilir
+  Şarkılar soldaki ⠿ tutamağından sürüklenerek sıralanabilir ya da başka yüze taşınabilir;
+  düz numaralar (1, 2… ya da A1, A2…) yeni sıraya göre yeniden verilir
 - Notlar (baskı, durum, nereden alındığı…)
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.

@@ -2,12 +2,13 @@
 // Yeniden çek" diye sorar; burada deklanşöre basınca kare doğrudan köşe ekranına
 // gider, beğenilmezse oradan tekrar çekilir. Kamera bir kez açılır ve close()
 // çağrılana kadar açık kalır; böylece tekrar çekmek beklemeden olur.
-// Kamera bir kez açılamazsa (izin verilmedi, kamera yok) sayfa yenilenene kadar
-// telefonun kendi kamerası kullanılır.
+// Kameraya izin verilmezse ya da kamera yoksa sayfa yenilenene kadar telefonun
+// kendi kamerası kullanılır.
 const Camera = (() => {
   let failed = false;
   const supported = () => !failed && Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
 
+  const PERMANENT = ['NotAllowedError', 'SecurityError', 'NotFoundError', 'OverconstrainedError'];
   function errorText(err) {
     if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') return 'Kameraya izin verilmedi.';
     if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') return 'Kamera bulunamadı.';
@@ -69,8 +70,11 @@ const Camera = (() => {
           msg.hidden = true;
           shutter.disabled = false;
         } catch (err) {
+          if (closed) return;
           console.error(err);
-          failed = true;
+          // İzin yoksa ya da kamera bulunamadıysa sonraki çekimlerde doğrudan telefonun
+          // kamerası açılır; kamera başka uygulamada meşgulse bir dahaki sefere yine denenir.
+          if (PERMANENT.includes(err?.name)) failed = true;
           msgText.textContent = `${errorText(err)} Telefonun kendi kamerasıyla çekebilirsin.`;
           nativeBtn.hidden = false;
         } finally {
