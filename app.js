@@ -51,6 +51,51 @@ function discsOf(record) {
 
 const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 
+// Sanatçı, albüm, tür, plak şirketi ve şarkı adları/söyleyenleri "Her Kelimenin
+// İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Belirsiz i/ı
+// harfleri için plağın diğer adlarına bakılır. Plak şirketi (Philips, Columbia)
+// ve tür plağın adlarını etkilemez, kendi kelimelerine göre düzeltilir; plak
+// şirketinde ipucu yoksa yabancı ad sayılır. Eski sideA/sideB alanları da
+// discs yapısına çevrilir.
+const casingContext = (artist, album, tracks) =>
+  TextCase.evidence([artist, album, ...tracks.flatMap((t) => [t.title, t.artist])]);
+const caseLabel = (text) => TextCase.title(text, TextCase.FOREIGN_NAME);
+
+function normalizeRecord(record) {
+  const discs = discsOf(record);
+  const context = casingContext(record.artist, record.album, discs.flatMap((d) => d.sides.flat()));
+  const tc = (text) => TextCase.title(text, context);
+  const { sideA, sideB, ...rest } = record;
+  return {
+    ...rest,
+    artist: tc(record.artist),
+    album: tc(record.album),
+    genre: TextCase.title(record.genre),
+    label: caseLabel(record.label),
+    discs: discs.map((d) => ({
+      sides: d.sides.map((side) => side.map((t) => ({ ...t, title: tc(t.title), artist: tc(t.artist) }))),
+    })),
+  };
+}
+
+// Daha önce kaydedilmiş plakları bu biçime getirir; değişmeyenlere dokunmaz.
+// Değişen plakların ilk halleri namesBeforeCasing alanında saklanır (yedeğe de girer).
+async function normalizeStoredRecords() {
+  try {
+    for (const record of await DB.all()) {
+      const fixed = normalizeRecord(record);
+      if (JSON.stringify(fixed) === JSON.stringify(record)) continue;
+      if (!record.namesBeforeCasing) {
+        fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
+          .filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
+      }
+      await DB.put(fixed);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 const collator = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
 // Sıra numarası olanlar numaraya göre başta, olmayanlar sanatçıya göre sonda.
 const byRecordOrder = (a, b) =>
@@ -495,6 +540,7 @@ async function renderForm(id) {
         trackCount += tracks.length;
       });
       if (trackCount) filled.push(`${trackCount} şarkı`);
+      normalizeFormText();
       status.textContent = filled.length
         ? `Kapaktan dolduruldu: ${filled.join(', ')}. Kontrol etmeyi unutma.`
         : 'Kapakta yeni bilgi bulunamadı.';
@@ -538,6 +584,7 @@ async function renderForm(id) {
           filled.push(label);
         }
       });
+      normalizeFormText();
       status.textContent = filled.length
         ? `İnternetten dolduruldu: ${filled.join(', ')} (MusicBrainz). Kontrol etmeyi unutma.`
         : 'İnternette yeni bilgi bulunamadı ya da alanlar zaten dolu.';
@@ -550,8 +597,44 @@ async function renderForm(id) {
   }
   document.getElementById('lookupBtn').addEventListener('click', lookupOnline);
 
+  // Ad alanları, alandan çıkınca ve kapaktan/internetten doldurulunca
+  // "Her Kelimenin İlk Harfi Büyük" biçimine getirilir. Her alanın yazıldığı
+  // (ya da okunduğu) hali saklanır ve bütün alanlar her seferinde bu hallerden,
+  // kayıttakiyle aynı kuralla yeniden hesaplanır; sonuç alanların dolma sırasına
+  // bağlı olmaz. Üzerinde yazılan alana, imleç kaymasın diye, ayrılınca dokunulur.
+  const TEXT_FIELDS = '[name=artist], [name=album], [name=genre], [name=label], .t-title, .t-artist';
+  function rawText(el) {
+    if (el.value !== el.dataset.cased) el.dataset.raw = el.value;
+    return el.dataset.raw;
+  }
+  function normalizeFormText(skip = document.activeElement) {
+    const form = document.getElementById('form');
+    const field = (name) => rawText(form.elements[name]);
+    const tracks = [...view.querySelectorAll('.track-row')].map((row) => ({
+      title: rawText(row.querySelector('.t-title')),
+      artist: rawText(row.querySelector('.t-artist')),
+    }));
+    const context = casingContext(field('artist'), field('album'), tracks);
+    view.querySelectorAll(TEXT_FIELDS).forEach((el) => {
+      const raw = rawText(el);
+      const cased = el.name === 'genre' ? TextCase.title(raw)
+        : el.name === 'label' ? caseLabel(raw) : TextCase.title(raw, context);
+      if (el === skip) return;
+      el.dataset.cased = cased;
+      if (el.value !== cased) el.value = cased;
+    });
+  }
+  // Alandan çıkılınca: yazılan ya da yazarken kapaktan/internetten dolan alan da
+  // düzeltilir; odağın geçtiği alana dokunulmaz.
+  document.getElementById('form').addEventListener('focusout', (e) => {
+    if (!e.target.matches(TEXT_FIELDS)) return;
+    const next = e.relatedTarget;
+    normalizeFormText(next && next.matches(TEXT_FIELDS) ? next : null);
+  });
+
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    normalizeFormText(null);
     const f = new FormData(e.target);
     const artist = f.get('artist').trim();
     const album = f.get('album').trim();
@@ -561,7 +644,7 @@ async function renderForm(id) {
       errorEl.hidden = false;
       return;
     }
-    const record = {
+    const record = normalizeRecord({
       id: r.id || DB.newId(),
       no: f.get('no').trim(),
       artist,
@@ -575,7 +658,8 @@ async function renderForm(id) {
       backCover: images.backCover,
       createdAt: r.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    };
+      ...(r.namesBeforeCasing && { namesBeforeCasing: r.namesBeforeCasing }),
+    });
     await DB.put(record);
     toast('Kaydedildi');
     location.hash = `#/plak/${record.id}`;
@@ -648,11 +732,11 @@ document.getElementById('importInput').addEventListener('change', async (e) => {
     if (!confirm(`${data.records.length} plak geri yüklensin mi? Aynı plaklar yedekteki haliyle güncellenir.`)) return;
     for (const r of data.records) {
       if (!r.id || !r.artist || !r.album) continue;
-      await DB.put({
+      await DB.put(normalizeRecord({
         ...r,
         frontCover: r.frontCover ? await dataUrlToBlob(r.frontCover) : null,
         backCover: r.backCover ? await dataUrlToBlob(r.backCover) : null,
-      });
+      }));
     }
     toast('Yedek geri yüklendi');
     route();
@@ -670,4 +754,4 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // Tarayıcıdan verilerin kalıcı saklanmasını iste (otomatik temizlenmesin).
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
-route();
+normalizeStoredRecords().finally(route);

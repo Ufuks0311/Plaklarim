@@ -14,7 +14,7 @@ const ReleaseLookup = (() => {
 
   const quote = (s) => `"${s.replace(/["\\]/g, ' ').trim()}"`;
   const isVinyl = (r) => (r.media || []).some((m) => /vinyl/i.test(m.format || ''));
-  const titleCase = (s) => s.replace(/(^|[\s-])(\p{L})/gu, (m, sep, ch) => sep + ch.toLocaleUpperCase('tr'));
+  const titleCase = (s) => s.replace(/(^|[\s-])(\p{L})/gu, (m, sep, ch) => sep + ch.toLocaleUpperCase('en'));
 
   // { year, genre, label } döndürür; bulunamayan alanlar boş metin olur.
   // Hiç eşleşme yoksa null döner.
