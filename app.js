@@ -26,16 +26,30 @@ function toast(message) {
   toast.timer = setTimeout(() => { el.hidden = true; }, 2500);
 }
 
-// Şarkılar { no, title, artist } nesneleri olarak saklanır. Eski sürümlerde
-// düz metin ya da numarasız kaydedilmiş şarkılar okunurken bu yapıya çevrilir.
-const sideLetter = (side) => side.slice(-1);
-const autoTrackNo = (side, i) => `${sideLetter(side)}${i + 1}`;
+// Bir albüm bir ya da daha fazla plaktan oluşur: discs = [{ sides: [şarkılar, şarkılar] }].
+// Yüz harfleri plaklar boyunca devam eder: 1. plak A-B, 2. plak C-D, 3. plak E-F…
+// Şarkılar { no, title, artist } nesneleridir. Eski sürümlerdeki sideA/sideB
+// alanları, düz metin ya da numarasız şarkılar okunurken bu yapıya çevrilir.
+const MAX_DISCS = 12;
+const sideLetter = (disc, side) => String.fromCharCode(65 + disc * 2 + side);
+const autoTrackNo = (letter, i) => `${letter}${i + 1}`;
 
-function tracksOf(record, side) {
-  return (record[side] || []).map((t, i) => (typeof t === 'string'
-    ? { no: autoTrackNo(side, i), title: t, artist: '' }
-    : { no: t.no || autoTrackNo(side, i), title: t.title || '', artist: t.artist || '' }));
+function normalizeTracks(list, letter) {
+  return (Array.isArray(list) ? list : []).map((t, i) => (typeof t === 'string'
+    ? { no: autoTrackNo(letter, i), title: t, artist: '' }
+    : { no: t.no || autoTrackNo(letter, i), title: t.title || '', artist: t.artist || '' }));
 }
+
+function discsOf(record) {
+  const discs = Array.isArray(record.discs) && record.discs.length
+    ? record.discs
+    : [{ sides: [record.sideA, record.sideB] }];
+  return discs.slice(0, MAX_DISCS).map((d, di) => ({
+    sides: [0, 1].map((si) => normalizeTracks(d?.sides?.[si], sideLetter(di, si))),
+  }));
+}
+
+const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 
 const collator = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
 // Sıra numarası olanlar numaraya göre başta, olmayanlar sanatçıya göre sonda.
@@ -103,7 +117,7 @@ async function renderList() {
     lastQuery = q.value;
     const shown = term
       ? records.filter((r) => [r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
-          ...[...tracksOf(r, 'sideA'), ...tracksOf(r, 'sideB')].flatMap((t) => [t.title, t.artist])]
+          ...allTracks(r).flatMap((t) => [t.title, t.artist])]
           .join('\n').toLocaleLowerCase('tr').includes(term))
       : records;
     count.textContent = term
@@ -117,7 +131,7 @@ async function renderList() {
             : '<div class="no-cover" aria-hidden="true"></div>'}
           ${r.no ? `<span class="badge">#${esc(r.no)}</span>` : ''}
           <strong>${esc(r.album)}</strong>
-          <span>${esc(r.artist)}${r.year ? ` · ${esc(r.year)}` : ''}</span>
+          <span>${esc(r.artist)}${r.year ? ` · ${esc(r.year)}` : ''}${discsOf(r).length > 1 ? ` · ${discsOf(r).length} plak` : ''}</span>
         </a>
       </li>`).join('') || '<li class="empty">Sonuç yok.</li>';
   }
@@ -160,7 +174,9 @@ async function renderDetail(id) {
       </figure>`;
     }).join('');
 
-  const meta = [['Yıl', r.year], ['Plak şirketi', r.label], ['Tür', r.genre]]
+  const discs = discsOf(r);
+  const meta = [['Yıl', r.year], ['Plak şirketi', r.label], ['Tür', r.genre],
+    ['Plak sayısı', discs.length > 1 ? String(discs.length) : '']]
     .filter(([, v]) => v)
     .map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('');
 
@@ -172,10 +188,14 @@ async function renderDetail(id) {
       <p class="artist">${esc(r.artist)}</p>
       ${covers ? `<div class="covers">${covers}</div>` : ''}
       ${meta ? `<dl class="meta">${meta}</dl>` : ''}
-      <div class="sides">
-        ${trackList('A yüzü', tracksOf(r, 'sideA'), r.artist)}
-        ${trackList('B yüzü', tracksOf(r, 'sideB'), r.artist)}
-      </div>
+      ${discs.map((d, di) => {
+        const sides = d.sides.map((tracks, si) => trackList(`${sideLetter(di, si)} yüzü`, tracks, r.artist)).join('');
+        if (discs.length === 1) return sides ? `<div class="sides">${sides}</div>` : '';
+        return `<section class="disc">
+          <h2>${di + 1}. plak</h2>
+          ${sides ? `<div class="sides">${sides}</div>` : '<p class="hint">Şarkı girilmemiş.</p>'}
+        </section>`;
+      }).join('')}
       ${r.notes ? `<section class="notes"><h3>Notlar</h3><p>${esc(r.notes)}</p></section>` : ''}
       <div class="actions">
         <a href="#/duzenle/${esc(r.id)}" class="btn primary">Düzenle</a>
@@ -216,8 +236,8 @@ function coverPicker(key, label, blob) {
 
 // Otomatik numarayla aynı olan sıra numarası boş gösterilir; böylece şarkı
 // silinince ya da eklenince numaralar kendiliğinden kayar.
-function trackRow(t = { no: '', title: '', artist: '' }, side, i) {
-  const auto = autoTrackNo(side, i);
+function trackRow(t = { no: '', title: '', artist: '' }, letter, i) {
+  const auto = autoTrackNo(letter, i);
   return `
     <li class="track-row">
       <input class="t-no" placeholder="${auto}" value="${t.no === auto ? '' : esc(t.no)}" autocomplete="off" aria-label="Sıra no">
@@ -227,24 +247,39 @@ function trackRow(t = { no: '', title: '', artist: '' }, side, i) {
     </li>`;
 }
 
-function trackEditor(side, label, tracks) {
+function trackEditor(letter, tracks) {
   return `
-    <fieldset class="tracks" data-side="${side}">
-      <legend>${label}</legend>
-      <ol class="track-rows">${(tracks.length ? tracks : [undefined]).map((t, i) => trackRow(t, side, i)).join('')}</ol>
+    <fieldset class="tracks" data-side="${letter}">
+      <legend>${letter} yüzü</legend>
+      <ol class="track-rows">${(tracks.length ? tracks : [undefined]).map((t, i) => trackRow(t, letter, i)).join('')}</ol>
       <button type="button" class="btn small add-track">+ Şarkı ekle</button>
     </fieldset>`;
 }
 
-function readTracks(side) {
-  return [...view.querySelectorAll(`.tracks[data-side=${side}] .track-row`)]
+function discEditor(disc, di) {
+  return `
+    <div class="disc-edit" data-disc="${di}">
+      <h2 class="disc-title">${di + 1}. plak</h2>
+      ${disc.sides.map((tracks, si) => trackEditor(sideLetter(di, si), tracks)).join('')}
+    </div>`;
+}
+
+function readTracks(fs) {
+  const letter = fs.dataset.side;
+  return [...fs.querySelectorAll('.track-row')]
     .map((row) => ({
       no: row.querySelector('.t-no').value.trim(),
       title: row.querySelector('.t-title').value.trim(),
       artist: row.querySelector('.t-artist').value.trim(),
     }))
     .filter((t) => t.title)
-    .map((t, i) => ({ ...t, no: t.no || autoTrackNo(side, i) }));
+    .map((t, i) => ({ ...t, no: t.no || autoTrackNo(letter, i) }));
+}
+
+function readDiscs() {
+  return [...view.querySelectorAll('.disc-edit')].map((el) => ({
+    sides: [...el.querySelectorAll('.tracks')].map(readTracks),
+  }));
 }
 
 function renumberPlaceholders(fs) {
@@ -253,13 +288,34 @@ function renumberPlaceholders(fs) {
   });
 }
 
+// Kapaktan okunan yüzleri sıraya koyar: sonuç[0] A yüzü, sonuç[1] B yüzü…
+// Harfler geçerli ve tekrarsızsa harfe göre, değilse okunduğu sıraya göre.
+function sidesFromCover(list) {
+  const sides = (Array.isArray(list) ? list : []).map((s) => ({
+    letter: String(s?.letter || '').trim().toUpperCase(),
+    tracks: (s?.tracks || [])
+      .filter((t) => t?.title && t.title.trim())
+      .map((t) => ({ no: (t.no || '').trim(), title: t.title.trim(), artist: (t.artist || '').trim() })),
+  }));
+  const max = MAX_DISCS * 2;
+  const letters = sides.map((s) => (/^[A-Z]$/.test(s.letter) ? s.letter.charCodeAt(0) - 65 : -1));
+  const byLetter = letters.every((i) => i >= 0 && i < max) && new Set(letters).size === letters.length;
+  const out = [];
+  sides.forEach((s, k) => {
+    const idx = byLetter ? letters[k] : k;
+    if (idx < max) out[idx] = s.tracks;
+  });
+  return Array.from(out, (t) => t || []);
+}
+
 async function renderForm(id) {
   const existing = id ? await DB.get(id) : null;
   if (id && !existing) {
     view.innerHTML = '<p class="empty">Plak bulunamadı. <a href="#/">Listeye dön</a></p>';
     return;
   }
-  const r = existing || { sideA: [], sideB: [], no: nextRecordNo(await DB.all()) };
+  const r = existing || { no: nextRecordNo(await DB.all()) };
+  const discs = discsOf(r);
   const images = { frontCover: r.frontCover || null, backCover: r.backCover || null };
 
   view.innerHTML = `
@@ -299,9 +355,12 @@ async function renderForm(id) {
       </div>
 
 
-      <p class="hint">Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.</p>
-      ${trackEditor('sideA', 'A yüzü', tracksOf(r, 'sideA'))}
-      ${trackEditor('sideB', 'B yüzü', tracksOf(r, 'sideB'))}
+      <label class="disc-count">Plak sayısı
+        <select name="discCount">${Array.from({ length: MAX_DISCS }, (_, i) => `<option value="${i + 1}"${i + 1 === discs.length ? ' selected' : ''}>${i + 1}</option>`).join('')}</select>
+      </label>
+      <p class="hint">Albüm birden fazla plaktan oluşuyorsa plak sayısını seç; her plağın yüzleri (A-B, C-D…) ayrı listelenir.
+        Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.</p>
+      <div id="discs" class="${discs.length > 1 ? 'multi' : ''}">${discs.map(discEditor).join('')}</div>
       <label>Notlar
         <textarea name="notes" rows="3" placeholder="Baskı, durum, nereden alındığı…">${esc(r.notes)}</textarea>
       </label>
@@ -344,7 +403,10 @@ async function renderForm(id) {
     });
   });
 
-  view.querySelectorAll('.tracks').forEach((fs) => {
+  const discsEl = document.getElementById('discs');
+  const discCount = document.getElementById('form').elements.discCount;
+
+  function wireTrackEditor(fs) {
     const rows = fs.querySelector('.track-rows');
     fs.querySelector('.add-track').addEventListener('click', () => {
       rows.insertAdjacentHTML('beforeend', trackRow(undefined, fs.dataset.side, rows.children.length));
@@ -366,7 +428,30 @@ async function renderForm(id) {
         if (next) next.focus(); else fs.querySelector('.add-track').click();
       }
     });
-  });
+  }
+  discsEl.querySelectorAll('.tracks').forEach(wireTrackEditor);
+
+  // Plak sayısını değiştirir; silinecek plaklarda şarkı varsa önce sorar.
+  function setDiscCount(count) {
+    const current = discsEl.querySelectorAll('.disc-edit');
+    if (count < current.length) {
+      const dropped = [...current].slice(count);
+      const filled = dropped.filter((el) => [...el.querySelectorAll('.tracks')].some((fs) => readTracks(fs).length));
+      if (filled.length && !confirm(`${filled.map((el) => `${Number(el.dataset.disc) + 1}. plak`).join(', ')} şarkılarıyla birlikte silinsin mi?`)) {
+        discCount.value = String(current.length);
+        return false;
+      }
+      dropped.forEach((el) => el.remove());
+    }
+    for (let di = current.length; di < count; di++) {
+      discsEl.insertAdjacentHTML('beforeend', discEditor({ sides: [[], []] }, di));
+      discsEl.lastElementChild.querySelectorAll('.tracks').forEach(wireTrackEditor);
+    }
+    discsEl.classList.toggle('multi', count > 1);
+    discCount.value = String(count);
+    return true;
+  }
+  discCount.addEventListener('change', () => setDiscCount(Number(discCount.value)));
 
   // Kapak fotoğrafından okunan bilgileri forma yazar. Elle girilmiş alanların
   // üzerine yazmaz; şarkı listesi doluysa değiştirmeden önce sorar.
@@ -392,21 +477,25 @@ async function renderForm(id) {
             filled.push(label);
           }
         });
+      const sides = sidesFromCover(info.sides);
+      const lastFilled = sides.reduce((last, tracks, i) => (tracks.length ? i : last), -1);
+      const neededDiscs = Math.min(MAX_DISCS, Math.ceil((lastFilled + 1) / 2));
+      const before = discsEl.querySelectorAll('.disc-edit').length;
+      if (neededDiscs > before && setDiscCount(neededDiscs)) filled.push(`${neededDiscs} plak`);
       let trackCount = 0;
-      for (const side of ['sideA', 'sideB']) {
-        const tracks = (info[side] || []).filter((t) => t.title && t.title.trim());
-        if (!tracks.length) continue;
-        const fs = view.querySelector(`.tracks[data-side=${side}]`);
-        const label = side === 'sideA' ? 'A' : 'B';
-        if (readTracks(side).length &&
-            !confirm(`${label} yüzü için kapaktan ${tracks.length} şarkı okundu. Mevcut liste bununla değiştirilsin mi?`)) {
-          continue;
+      sides.forEach((tracks, idx) => {
+        const letter = String.fromCharCode(65 + idx);
+        const fs = view.querySelector(`.tracks[data-side=${letter}]`);
+        if (!tracks.length || !fs) return;
+        if (readTracks(fs).length &&
+            !confirm(`${letter} yüzü için kapaktan ${tracks.length} şarkı okundu. Mevcut liste bununla değiştirilsin mi?`)) {
+          return;
         }
         fs.querySelector('.track-rows').innerHTML = tracks
-          .map((t, i) => trackRow({ no: t.no.trim() || autoTrackNo(side, i), title: t.title.trim(), artist: t.artist.trim() }, side, i))
+          .map((t, i) => trackRow({ no: t.no || autoTrackNo(letter, i), title: t.title, artist: t.artist }, letter, i))
           .join('');
         trackCount += tracks.length;
-      }
+      });
       if (trackCount) filled.push(`${trackCount} şarkı`);
       status.textContent = filled.length
         ? `Kapaktan dolduruldu: ${filled.join(', ')}. Kontrol etmeyi unutma.`
@@ -483,8 +572,7 @@ async function renderForm(id) {
       genre: f.get('genre').trim(),
       label: f.get('label').trim(),
       notes: f.get('notes').trim(),
-      sideA: readTracks('sideA'),
-      sideB: readTracks('sideB'),
+      discs: readDiscs(),
       frontCover: images.frontCover,
       backCover: images.backCover,
       createdAt: r.createdAt || new Date().toISOString(),
