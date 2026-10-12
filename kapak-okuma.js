@@ -36,6 +36,16 @@ const CoverReader = (() => {
     required: ['no', 'title', 'artist'],
     additionalProperties: false,
   };
+  // Çok plaklı albümlerde yüzler A, B, C, D… diye devam eder.
+  const side = {
+    type: 'object',
+    properties: {
+      letter: { type: 'string' },
+      tracks: { type: 'array', items: track },
+    },
+    required: ['letter', 'tracks'],
+    additionalProperties: false,
+  };
   const SCHEMA = {
     type: 'object',
     properties: {
@@ -43,24 +53,28 @@ const CoverReader = (() => {
       album: { type: 'string' },
       year: { type: 'string' },
       label: { type: 'string' },
-      sideA: { type: 'array', items: track },
-      sideB: { type: 'array', items: track },
+      sides: { type: 'array', items: side },
     },
-    required: ['artist', 'album', 'year', 'label', 'sideA', 'sideB'],
+    required: ['artist', 'album', 'year', 'label', 'sides'],
     additionalProperties: false,
   };
 
   const PROMPTS = {
     front: 'Bu bir plağın ön kapak fotoğrafı. Kapakta yazan sanatçı ve albüm adını oku; '
       + 'görünüyorsa yılı ve plak şirketini de ekle.',
-    back: 'Bu bir plağın arka kapak fotoğrafı. A yüzü ve B yüzündeki şarkıları kapakta '
-      + 'yazdığı sırayla çıkar; görünüyorsa sanatçı, albüm adı, yıl ve plak şirketini de ekle.',
+    back: 'Bu bir plağın arka kapak fotoğrafı. Her yüzdeki şarkıları kapakta yazdığı sırayla, '
+      + 'yüz yüz ayrı çıkar; görünüyorsa sanatçı, albüm adı, yıl ve plak şirketini de ekle.',
   };
   const RULES = 'Kurallar: Yazıları kapakta göründüğü gibi, Türkçe karakterleri koruyarak yaz. '
     + 'Görünmeyen ya da emin olmadığın alanları boş bırak, tahmin etme. '
     + 'Şarkı numarasını kapakta yazdığı gibi yaz (A1, B2, 1, 2…); yazmıyorsa boş bırak. '
     + 'Şarkının söyleyenini yalnızca her şarkı için ayrı sanatçı yazıyorsa (karma plak) doldur, '
-    + 'yoksa boş bırak. Yüzler ayrılmamışsa şarkıları sırayla A yüzüne koy.';
+    + 'yoksa boş bırak. Albüm birden fazla plaktan oluşabilir: yüzler A, B, C, D… diye devam eder '
+    + '(1. plak A-B, 2. plak C-D). Her yüzü letter alanında harfiyle ver; kapakta "Side 1/2/3" ya da '
+    + '"Plak 2 / B yüzü" gibi yazıyorsa sırasına göre harfe çevir (Side 3 = C). '
+    + 'Yüzler ayrılmamışsa şarkıları sırayla A yüzüne koy; plaklar ayrılmış ama yüzler '
+    + 'ayrılmamışsa her plağın şarkılarını o plağın ilk yüzüne koy (1. plak A, 2. plak C). '
+    + 'Ön kapakta şarkı yoksa sides boş liste olsun.';
 
   // Servisin döndürdüğü asıl hata metni (ör. "Your credit balance is too low…").
   const apiMessage = (err) => err?.error?.error?.message || err?.message || '';
