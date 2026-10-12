@@ -319,7 +319,7 @@ async function renderForm(id) {
         input.value = '';
         if (!file) return;
         try {
-          // Fotoğraf kare çerçeveye kırpılır; vazgeçilirse önceki görsel kalır.
+          // Kapağın köşeleri bulunup kareye oturtulur; vazgeçilirse önceki görsel kalır.
           const cropped = await CoverCropper.open(file, MAX_IMAGE_SIDE);
           if (!cropped) return;
           images[key] = cropped;
