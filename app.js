@@ -310,6 +310,10 @@ async function renderForm(id) {
       <label>Plak şirketi
         <input name="label" value="${esc(r.label)}">
       </label>
+      <div class="lookup">
+        <button type="button" class="btn small" id="lookupBtn">Yıl, tür ve plak şirketini internetten bul</button>
+        <p class="read-status" id="lookupStatus" hidden></p>
+      </div>
 
 
       <p class="hint">Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.</p>
@@ -422,11 +426,57 @@ async function renderForm(id) {
       status.textContent = filled.length
         ? `Kapaktan dolduruldu: ${filled.join(', ')}. Kontrol etmeyi unutma.`
         : 'Kapakta yeni bilgi bulunamadı.';
+      const f = form.elements;
+      if (f.artist.value.trim() && f.album.value.trim() &&
+          !(f.year.value.trim() && f.genre.value.trim() && f.label.value.trim())) {
+        lookupOnline();
+      }
     } catch (err) {
       console.error(err);
       status.textContent = `Kapak okunamadı: ${err.message}`;
     }
   }
+
+  // Boş kalan yıl, tür ve plak şirketi alanlarını internetten doldurur.
+  async function lookupOnline() {
+    const form = document.getElementById('form');
+    const status = document.getElementById('lookupStatus');
+    const btn = document.getElementById('lookupBtn');
+    const artist = form.elements.artist.value.trim();
+    const album = form.elements.album.value.trim();
+    status.hidden = false;
+    if (!artist || !album) {
+      status.textContent = 'Önce sanatçı ve albüm adını yaz.';
+      return;
+    }
+    btn.disabled = true;
+    status.textContent = 'İnternette aranıyor…';
+    try {
+      const found = await ReleaseLookup.find(artist, album);
+      if (!document.body.contains(status)) return; // arama sürerken ekran değişti
+      if (!found) {
+        status.textContent = 'Bu plak internette bulunamadı; bilgileri elle girebilirsin.';
+        return;
+      }
+      const filled = [];
+      [['year', 'yıl'], ['genre', 'tür'], ['label', 'plak şirketi']].forEach(([name, label]) => {
+        const input = form.elements[name];
+        if (found[name] && !input.value.trim()) {
+          input.value = found[name];
+          filled.push(label);
+        }
+      });
+      status.textContent = filled.length
+        ? `İnternetten dolduruldu: ${filled.join(', ')} (MusicBrainz). Kontrol etmeyi unutma.`
+        : 'İnternette yeni bilgi bulunamadı ya da alanlar zaten dolu.';
+    } catch (err) {
+      console.error(err);
+      status.textContent = `İnternetten alınamadı: ${err.message === 'Failed to fetch' ? 'bağlantı yok.' : err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  document.getElementById('lookupBtn').addEventListener('click', lookupOnline);
 
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();

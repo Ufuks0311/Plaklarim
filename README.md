@@ -26,6 +26,14 @@ yüklenince A ve B yüzü şarkıları kendiliğinden doldurulur. Okumayı Claud
 - Elle yazdığın alanların üzerine yazılmaz; şarkı listesi doluysa değiştirmeden
   önce sorar. Okunan bilgileri kaydetmeden önce kontrol et.
 
+## İnternetten yıl, tür ve plak şirketi
+
+Formdaki **Yıl, tür ve plak şirketini internetten bul** düğmesi, sanatçı ve
+albüm adına göre bu bilgileri [MusicBrainz](https://musicbrainz.org) müzik
+veritabanından getirir. Ücretsizdir, anahtar gerekmez. Kapaktan sanatçı ve
+albüm okunduğunda arama kendiliğinden yapılır. Yalnızca boş alanlar doldurulur;
+plak baskısı varsa onun yılı ve plak şirketi tercih edilir.
+
 ## Veriler nerede duruyor?
 
 Kayıtlar ve görseller, uygulamayı açtığın tarayıcının kendi veritabanında
