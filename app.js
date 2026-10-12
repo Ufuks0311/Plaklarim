@@ -284,6 +284,12 @@ async function renderForm(id) {
       <a href="${id ? `#/plak/${esc(id)}` : '#/'}" class="back">‹ Vazgeç</a>
       <h1>${id ? 'Plağı düzenle' : 'Yeni plak'}</h1>
 
+      <p class="hint">Önce kapak fotoğraflarını ekle; okuma açıksa aşağıdaki bilgiler kapaktan doldurulur.</p>
+      <div class="covers-edit">
+        ${coverPicker('frontCover', 'Ön kapak', images.frontCover)}
+        ${coverPicker('backCover', 'Arka kapak', images.backCover)}
+      </div>
+
       <label class="no-field">Sıra no
         <input name="no" inputmode="numeric" value="${esc(r.no)}" autocomplete="off">
       </label>
@@ -305,10 +311,6 @@ async function renderForm(id) {
         <input name="label" value="${esc(r.label)}">
       </label>
 
-      <div class="covers-edit">
-        ${coverPicker('frontCover', 'Ön kapak', images.frontCover)}
-        ${coverPicker('backCover', 'Arka kapak', images.backCover)}
-      </div>
 
       <p class="hint">Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.</p>
       ${trackEditor('sideA', 'A yüzü', tracksOf(r, 'sideA'))}
