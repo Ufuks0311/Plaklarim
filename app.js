@@ -53,23 +53,25 @@ const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 
 // Sanatçı, albüm, tür, plak şirketi ve şarkı adları/söyleyenleri "Her Kelimenin
 // İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Belirsiz i/ı
-// harfleri için plağın diğer adlarına bakılır; tür çoğu zaman başka dilde olduğu
-// için yalnızca kendi kelimelerine göre düzeltilir. Eski sideA/sideB alanları
-// da discs yapısına çevrilir.
-const casingContext = (artist, album, label, tracks) =>
-  TextCase.evidence([artist, album, label, ...tracks.flatMap((t) => [t.title, t.artist])]);
+// harfleri için plağın diğer adlarına bakılır. Plak şirketi (Philips, Columbia)
+// ve tür çoğu zaman yabancı olduğundan plağın adlarını etkilemez; kendi
+// kelimelerine göre, ipucu yoksa yabancı ad gibi düzeltilir. Eski sideA/sideB
+// alanları da discs yapısına çevrilir.
+const casingContext = (artist, album, tracks) =>
+  TextCase.evidence([artist, album, ...tracks.flatMap((t) => [t.title, t.artist])]);
+const caseBrand = (text) => TextCase.title(text, TextCase.FOREIGN_NAME);
 
 function normalizeRecord(record) {
   const discs = discsOf(record);
-  const context = casingContext(record.artist, record.album, record.label, discs.flatMap((d) => d.sides.flat()));
+  const context = casingContext(record.artist, record.album, discs.flatMap((d) => d.sides.flat()));
   const tc = (text) => TextCase.title(text, context);
   const { sideA, sideB, ...rest } = record;
   return {
     ...rest,
     artist: tc(record.artist),
     album: tc(record.album),
-    genre: TextCase.title(record.genre),
-    label: tc(record.label),
+    genre: caseBrand(record.genre),
+    label: caseBrand(record.label),
     discs: discs.map((d) => ({
       sides: d.sides.map((side) => side.map((t) => ({ ...t, title: tc(t.title), artist: tc(t.artist) }))),
     })),
@@ -612,17 +614,21 @@ async function renderForm(id) {
       title: rawText(row.querySelector('.t-title')),
       artist: rawText(row.querySelector('.t-artist')),
     }));
-    const context = casingContext(field('artist'), field('album'), field('label'), tracks);
+    const context = casingContext(field('artist'), field('album'), tracks);
     view.querySelectorAll(TEXT_FIELDS).forEach((el) => {
-      const cased = TextCase.title(rawText(el), el.name === 'genre' ? undefined : context);
+      const raw = rawText(el);
+      const cased = el.name === 'genre' || el.name === 'label' ? caseBrand(raw) : TextCase.title(raw, context);
       if (el === skip) return;
       el.dataset.cased = cased;
       if (el.value !== cased) el.value = cased;
     });
   }
-  document.getElementById('form').addEventListener('change', (e) => {
+  // Alandan çıkılınca: yazılan ya da yazarken kapaktan/internetten dolan alan da
+  // düzeltilir; odağın geçtiği alana dokunulmaz.
+  document.getElementById('form').addEventListener('focusout', (e) => {
     if (!e.target.matches(TEXT_FIELDS)) return;
-    normalizeFormText(document.activeElement === e.target ? null : document.activeElement);
+    const next = e.relatedTarget;
+    normalizeFormText(next && next.matches(TEXT_FIELDS) ? next : null);
   });
 
   document.getElementById('form').addEventListener('submit', async (e) => {
