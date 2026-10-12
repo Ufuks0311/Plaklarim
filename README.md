@@ -7,7 +7,7 @@ Her plak için saklananlar:
 
 - Ön kapak ve arka kapak görseli (telefonun kamerasıyla çekilebilir ya da galeriden seçilebilir)
 - Sanatçı, albüm adı, yıl, tür, plak şirketi
-- A yüzü ve B yüzü şarkıları
+- A yüzü ve B yüzü şarkıları; her şarkı adı ve söyleyeniyle ayrı tutulur (karma plaklar için)
 - Notlar (baskı, durum, nereden alındığı…)
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.
