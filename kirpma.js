@@ -498,6 +498,10 @@ const CoverCropper = (() => {
     setHint(found);
     stage.prepend(source);
     document.body.append(overlay);
+    // Geri tuşu "Vazgeç" gibi davranır (bkz. katman.js).
+    let finish;
+    const done = new Promise((resolve) => { finish = resolve; });
+    const releaseBack = Overlay.add(() => finish(null));
     document.body.classList.add('no-scroll');
 
     // Görsel sahneye sığdırılır; ds = ekran pikseli / kaynak pikseli.
@@ -593,32 +597,32 @@ const CoverCropper = (() => {
     svg.addEventListener('pointercancel', release);
     window.addEventListener('resize', layout);
 
-    const result = await new Promise((resolve) => {
-      overlay.addEventListener('click', (e) => {
-        const act = e.target.closest('[data-act]')?.dataset.act;
-        if (act === 'cancel') resolve(null);
-        if (act === 'ok') resolve('ok');
-        if (act === 'retake') {
-          onRetake();
-          resolve(RETAKE);
-        }
-        if (act === 'detect') {
-          const again = detectCorners(source);
-          if (again) corners = again;
-          setHint(Boolean(again));
-          draw();
-        }
-        if (act === 'rotate') {
-          const oldHeight = source.height;
-          source.remove();
-          source = rotate(source);
-          stage.prepend(source);
-          corners = orderCorners(corners.map((p) => ({ x: oldHeight - p.y, y: p.x })));
-          layout();
-        }
-      });
+    overlay.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'cancel') finish(null);
+      if (act === 'ok') finish('ok');
+      if (act === 'retake') {
+        onRetake();
+        finish(RETAKE);
+      }
+      if (act === 'detect') {
+        const again = detectCorners(source);
+        if (again) corners = again;
+        setHint(Boolean(again));
+        draw();
+      }
+      if (act === 'rotate') {
+        const oldHeight = source.height;
+        source.remove();
+        source = rotate(source);
+        stage.prepend(source);
+        corners = orderCorners(corners.map((p) => ({ x: oldHeight - p.y, y: p.x })));
+        layout();
+      }
     });
 
+    const result = await done;
+    releaseBack();
     window.removeEventListener('resize', layout);
     overlay.remove();
     document.body.classList.remove('no-scroll');

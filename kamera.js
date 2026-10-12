@@ -2,8 +2,11 @@
 // Yeniden çek" diye sorar; burada deklanşöre basınca kare doğrudan köşe ekranına
 // gider, beğenilmezse oradan tekrar çekilir. Kamera bir kez açılır ve close()
 // çağrılana kadar açık kalır; böylece tekrar çekmek beklemeden olur.
+// Kamera bir kez açılamazsa (izin verilmedi, kamera yok) sayfa yenilenene kadar
+// telefonun kendi kamerası kullanılır.
 const Camera = (() => {
-  const supported = () => Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
+  let failed = false;
+  const supported = () => !failed && Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
 
   function errorText(err) {
     if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') return 'Kameraya izin verilmedi.';
@@ -67,6 +70,7 @@ const Camera = (() => {
           shutter.disabled = false;
         } catch (err) {
           console.error(err);
+          failed = true;
           msgText.textContent = `${errorText(err)} Telefonun kendi kamerasıyla çekebilirsin.`;
           nativeBtn.hidden = false;
         } finally {
@@ -81,9 +85,12 @@ const Camera = (() => {
       if (document.visibilityState === 'visible' && !overlay.hidden) start();
     };
     document.addEventListener('visibilitychange', onVisible);
-    // Telefonun geri tuşuyla başka ekrana geçilirse kamerayı bırak.
-    const onLeave = () => finish?.(null);
-    window.addEventListener('hashchange', onLeave);
+    // Geri tuşu kamerayı kapatır (bkz. katman.js).
+    let cancelled = false;
+    const releaseBack = Overlay.add(() => {
+      cancelled = true;
+      finish?.(null);
+    });
 
     function frame() {
       const canvas = document.createElement('canvas');
@@ -106,6 +113,7 @@ const Camera = (() => {
 
     // Bir kare çeker: canvas (kamera), File (telefonun kamerası) ya da vazgeçilirse null.
     function shoot() {
+      if (cancelled || closed) return Promise.resolve(null);
       overlay.hidden = false;
       document.body.classList.add('no-scroll');
       start();
@@ -120,10 +128,11 @@ const Camera = (() => {
     }
 
     function close() {
+      if (closed) return;
       closed = true;
       finish?.(null);
+      releaseBack();
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('hashchange', onLeave);
       stream?.getTracks().forEach((t) => t.stop());
       stream = null;
       overlay.remove();

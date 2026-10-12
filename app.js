@@ -327,6 +327,18 @@ function readDiscs() {
 }
 
 const isEmptyRow = (row) => [...row.querySelectorAll('input')].every((input) => !input.value.trim());
+const SIMPLE_NO = /^([A-Z]\s*)?\d+$/i; // 6, A6
+
+// Şarkı başka yere sürüklenince yüzdeki numaralar yalnızca düz sayılarsa
+// (1, 2… ya da A1, A2…) silinir; yerlerine sıraya göre otomatik numaralar gelir.
+// "A1a", "2-3" gibi özel numaralar varsa olduğu gibi kalır.
+function resetSimpleNumbers(fs) {
+  const inputs = [...fs.querySelectorAll('.t-no')];
+  if (inputs.every((input) => !input.value.trim() || SIMPLE_NO.test(input.value.trim()))) {
+    inputs.forEach((input) => { input.value = ''; });
+  }
+  renumberPlaceholders(fs);
+}
 
 function renumberPlaceholders(fs) {
   fs.querySelectorAll('.t-no').forEach((input, i) => {
@@ -436,6 +448,7 @@ async function renderForm(id) {
         return null;
       }
       if (!cropped || cropped === CoverCropper.RETAKE) return cropped;
+      if (!picker.isConnected) return null; // bu arada başka ekrana geçildi
       images[key] = cropped;
       preview.innerHTML = `<img src="${blobUrl(images[key])}" alt="">`;
       removeBtn.hidden = false;
@@ -444,7 +457,8 @@ async function renderForm(id) {
     }
 
     // Kutuya dokununca uygulamanın kendi kamerası açılır; çekilen kare onay
-    // sorulmadan köşe ekranına gelir. Desteklenmeyen tarayıcıda telefonun kamerası açılır.
+    // sorulmadan köşe ekranına gelir. Desteklenmeyen tarayıcıda ya da kamera
+    // izni yoksa telefonun kamerası açılır (etiket bağlı olduğu girişi açar).
     let shooting = false;
     preview.addEventListener('click', async (e) => {
       if (!Camera.supported()) return;
@@ -455,7 +469,14 @@ async function renderForm(id) {
       try {
         for (;;) {
           const shot = await camera.shoot();
-          if (!shot || await useImage(shot, () => {}) !== CoverCropper.RETAKE) break;
+          if (!shot || !picker.isConnected) break;
+          if (!(shot instanceof HTMLCanvasElement)) {
+            // Kamera açılamadı, telefonun kamerasıyla çekildi; tekrar çekmek de onunla.
+            camera.close();
+            await useImage(shot, () => cameraInput.click());
+            break;
+          }
+          if (await useImage(shot, () => {}) !== CoverCropper.RETAKE) break;
         }
       } finally {
         camera.close();
@@ -542,7 +563,10 @@ async function renderForm(id) {
     const row = handle.closest('.track-row');
     const from = row.closest('.tracks');
     const pointerId = e.pointerId;
-    let y = e.clientY;
+    const startY = e.clientY;
+    let y = startY;
+    let moved = false; // parmak kıpırdamadan basılı tutmak satırı yerinden oynatmaz
+    let changed = false;
     let frame = 0;
     row.classList.add('dragging');
     // Satır yer değiştirince tarayıcı yakalamayı bırakır; olaylar pencereden dinlenir
@@ -563,19 +587,26 @@ async function renderForm(id) {
       }) || null;
       if (row.parentElement !== list || row.nextElementSibling !== before) {
         list.insertBefore(row, before);
+        changed = true;
         capture();
       }
     }
     function tick() {
-      const edge = 72;
-      if (y < edge) window.scrollBy(0, -Math.ceil((edge - y) / 6));
-      else if (y > window.innerHeight - edge) window.scrollBy(0, Math.ceil((y - window.innerHeight + edge) / 6));
-      place();
+      if (moved) {
+        const edge = 72;
+        if (y < edge) window.scrollBy(0, -Math.ceil((edge - y) / 6));
+        else if (y > window.innerHeight - edge) window.scrollBy(0, Math.ceil((y - window.innerHeight + edge) / 6));
+        place();
+      }
       frame = requestAnimationFrame(tick);
     }
     frame = requestAnimationFrame(tick);
 
-    const move = (ev) => { if (ev.pointerId === pointerId) y = ev.clientY; };
+    const move = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      y = ev.clientY;
+      if (Math.abs(y - startY) > 8) moved = true;
+    };
     function end(ev) {
       if (ev.pointerId !== pointerId) return;
       cancelAnimationFrame(frame);
@@ -583,18 +614,19 @@ async function renderForm(id) {
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
       row.classList.remove('dragging');
+      if (!changed) return;
       const to = row.closest('.tracks');
       if (to !== from) {
-        // Eski yüzün harfini taşıyan numara (A6) yeni yüzde otomatik numaraya döner.
+        // Başka yüze geçen şarkının düz numarası (6, A6) yeni yüzde otomatik numaraya döner.
         const no = row.querySelector('.t-no');
-        if (new RegExp(`^${from.dataset.side}\\s*\\d+$`, 'i').test(no.value.trim())) no.value = '';
+        if (SIMPLE_NO.test(no.value.trim())) no.value = '';
         to.querySelectorAll('.track-row').forEach((other) => { if (other !== row && isEmptyRow(other)) other.remove(); });
         if (!from.querySelector('.track-row')) {
           from.querySelector('.track-rows').insertAdjacentHTML('beforeend', trackRow(undefined, from.dataset.side, 0));
         }
-        renumberPlaceholders(from);
+        resetSimpleNumbers(from);
       }
-      renumberPlaceholders(to);
+      resetSimpleNumbers(to);
     }
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
@@ -625,26 +657,26 @@ async function renderForm(id) {
             filled.push(label);
           }
         });
+      // Okunan şarkılar bütün listenin yerine geçer; liste doluysa bir kez sorulur.
+      // (Yüz yüz değiştirmek, elle başka yüze taşınmış şarkıları iki kez yazardı.)
       const sides = sidesFromCover(info.sides);
-      const lastFilled = sides.reduce((last, tracks, i) => (tracks.length ? i : last), -1);
-      const neededDiscs = Math.min(MAX_DISCS, Math.ceil((lastFilled + 1) / 2));
-      const before = discsEl.querySelectorAll('.disc-edit').length;
-      if (neededDiscs > before && setDiscCount(neededDiscs)) filled.push(`${neededDiscs} plak`);
-      let trackCount = 0;
-      sides.forEach((tracks, idx) => {
-        const letter = String.fromCharCode(65 + idx);
-        const fs = view.querySelector(`.tracks[data-side=${letter}]`);
-        if (!tracks.length || !fs) return;
-        if (readTracks(fs).length &&
-            !confirm(`${letter} yüzü için kapaktan ${tracks.length} şarkı okundu. Mevcut liste bununla değiştirilsin mi?`)) {
-          return;
-        }
-        fs.querySelector('.track-rows').innerHTML = tracks
-          .map((t, i) => trackRow({ no: t.no || autoTrackNo(letter, i), title: t.title, artist: t.artist }, letter, i))
-          .join('');
-        trackCount += tracks.length;
-      });
-      if (trackCount) filled.push(`${trackCount} şarkı`);
+      const trackCount = sides.reduce((n, tracks) => n + tracks.length, 0);
+      const hasTracks = () => [...view.querySelectorAll('.tracks')].some((fs) => readTracks(fs).length);
+      if (trackCount && (!hasTracks() ||
+          confirm(`Kapaktan ${trackCount} şarkı okundu. Şarkı listesi bununla değiştirilsin mi?`))) {
+        const lastFilled = sides.reduce((last, tracks, i) => (tracks.length ? i : last), -1);
+        const neededDiscs = Math.min(MAX_DISCS, Math.ceil((lastFilled + 1) / 2));
+        const before = discsEl.querySelectorAll('.disc-edit').length;
+        if (neededDiscs > before && setDiscCount(neededDiscs)) filled.push(`${neededDiscs} plak`);
+        view.querySelectorAll('.tracks').forEach((fs) => {
+          const letter = fs.dataset.side;
+          const tracks = sides[letter.charCodeAt(0) - 65] || [];
+          fs.querySelector('.track-rows').innerHTML = tracks.length
+            ? tracks.map((t, i) => trackRow({ no: t.no || autoTrackNo(letter, i), title: t.title, artist: t.artist }, letter, i)).join('')
+            : trackRow(undefined, letter, 0);
+        });
+        filled.push(`${trackCount} şarkı`);
+      }
       normalizeFormText();
       status.textContent = filled.length
         ? `Kapaktan dolduruldu: ${filled.join(', ')}. Kontrol etmeyi unutma.`

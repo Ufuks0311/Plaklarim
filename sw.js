@@ -8,6 +8,7 @@ const FILES = [
   'db.js',
   'buyuk-harf.js',
   'app.js',
+  'katman.js',
   'kamera.js',
   'kirpma.js',
   'kapak-okuma.js',
