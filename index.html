@@ -21,6 +21,7 @@
     </a>
     <button id="menuBtn" class="icon-btn" aria-label="Menü" aria-haspopup="true">⋮</button>
     <div id="menu" class="menu" hidden>
+      <button data-action="reader">Kapak okuma ayarı</button>
       <button data-action="export">Yedeği indir</button>
       <label class="menu-item">Yedekten geri yükle
         <input type="file" id="importInput" accept="application/json,.json" hidden>
@@ -33,6 +34,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="db.js"></script>
+  <script src="kapak-okuma.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

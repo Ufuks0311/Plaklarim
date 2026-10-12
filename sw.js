@@ -1,12 +1,14 @@
 // Uygulama dosyalarını önbelleğe alır; internet yokken de açılır.
 // Dosyalar değiştiğinde CACHE adını artır.
-const CACHE = 'plaklarim-v3';
+const CACHE = 'plaklarim-v4';
 const FILES = [
   './',
   'index.html',
   'styles.css',
   'db.js',
   'app.js',
+  'kapak-okuma.js',
+  'vendor/anthropic-sdk.min.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

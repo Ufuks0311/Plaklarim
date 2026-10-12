@@ -12,6 +12,20 @@ Her plak için saklananlar:
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir.
 
+## Kapaktan otomatik doldurma
+
+Ön kapak fotoğrafı yüklenince sanatçı ve albüm adı, arka kapak fotoğrafı
+yüklenince A ve B yüzü şarkıları kendiliğinden doldurulur. Okumayı Claude
+(Anthropic) görsel tanıma yapar:
+
+- Sağ üstteki **⋮ → Kapak okuma ayarı**'na bir Anthropic API anahtarı
+  yapıştır (console.anthropic.com → API Keys). Anahtar yalnızca o cihazdaki
+  tarayıcıda saklanır, başka hiçbir yere gönderilmez.
+- Ücretlidir: kapak başına birkaç kuruşluk API kullanımı. Anahtar girilmezse
+  uygulama eskisi gibi elle doldurularak çalışır.
+- Elle yazdığın alanların üzerine yazılmaz; şarkı listesi doluysa değiştirmeden
+  önce sorar. Okunan bilgileri kaydetmeden önce kontrol et.
+
 ## Veriler nerede duruyor?
 
 Kayıtlar ve görseller, uygulamayı açtığın tarayıcının kendi veritabanında
