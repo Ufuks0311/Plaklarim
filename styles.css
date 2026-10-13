@@ -55,7 +55,21 @@ h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: 
   display: block; width: 100%; text-align: left; padding: .85rem 1rem;
   background: none; border: 0; color: var(--text); font: inherit; cursor: pointer;
 }
-.menu button + button, .menu button + .menu-item { border-top: 1px solid var(--line); }
+.menu > * + * { border-top: 1px solid var(--line); }
+.menu a.menu-item { text-decoration: none; }
+.top-actions { display: flex; align-items: center; }
+.cloud { display: grid; place-items: center; color: var(--muted); padding: .25rem .4rem; text-decoration: none; }
+.cloud[data-state=busy] { color: var(--accent); animation: cloud-pulse 1.2s ease-in-out infinite; }
+.cloud[data-state=error] { color: var(--danger); }
+.cloud[data-state=offline] { opacity: .45; }
+@keyframes cloud-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .cloud[data-state=busy] { animation: none; } }
+.cloud-line {
+  position: absolute; left: 0; right: 0; top: 100%;
+  padding: .35rem 1rem; text-align: center; font-size: .8rem; text-decoration: none;
+  color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.cloud-line.error { color: var(--danger); }
 
 main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 
@@ -253,5 +267,21 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 .form select {
   display: block; margin-top: .3rem; padding: .7rem .8rem; min-width: 6rem;
   font: inherit; font-weight: 400; color: var(--text);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+}
+
+.viewing { margin: 0 .25rem .75rem; font-size: .85rem; }
+.viewing a { color: var(--muted); text-decoration: none; }
+.cloud-page { max-width: 640px; }
+.cloud-page h2 { font-size: 1.05rem; margin: 0 0 .4rem; }
+.cloud-page section { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.cloud-page .steps { padding-left: 1.25rem; margin: 1rem 0; }
+.cloud-page .steps li { margin-bottom: 1.25rem; }
+.cloud-page .steps .hint { margin: .3rem 0 .5rem; }
+.cloud-status { color: var(--muted); font-size: .9rem; }
+.cloud-status.error { color: var(--danger); }
+.cloud-form { display: flex; gap: .5rem; margin-top: .5rem; }
+.cloud-form input {
+  flex: 1; min-width: 0; padding: .65rem .8rem; font: inherit; color: var(--text);
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
 }

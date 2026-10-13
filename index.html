@@ -19,14 +19,21 @@
       <img src="icons/icon.svg" alt="" width="28" height="28">
       <span>Plaklarım</span>
     </a>
-    <button id="menuBtn" class="icon-btn" aria-label="Menü" aria-haspopup="true">⋮</button>
+    <div class="top-actions">
+      <a href="#/bulut" id="cloudBtn" class="icon-btn cloud" aria-label="İnternette saklama" hidden>
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M7 18.5h10.5a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.4 9.2 4.7 4.7 0 0 0 7 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </a>
+      <button id="menuBtn" class="icon-btn" aria-label="Menü" aria-haspopup="true">⋮</button>
+    </div>
     <div id="menu" class="menu" hidden>
+      <a href="#/bulut" class="menu-item" data-action="cloud">İnternette saklama</a>
       <button data-action="reader">Kapak okuma ayarı</button>
       <button data-action="export">Yedeği indir</button>
-      <label class="menu-item">Yedekten geri yükle
+      <label class="menu-item" id="importItem">Yedekten geri yükle
         <input type="file" id="importInput" accept="application/json,.json" hidden>
       </label>
     </div>
+    <a href="#/bulut" id="cloudLine" class="cloud-line" hidden></a>
   </header>
 
   <main id="view"></main>
@@ -41,6 +48,7 @@
   <script src="kirpma.js"></script>
   <script src="kapak-okuma.js"></script>
   <script src="internetten-bilgi.js"></script>
+  <script src="bulut.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
