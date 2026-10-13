@@ -17,13 +17,15 @@
 const TextCase = (() => {
   // Kelime: harf, rakam ve kesme işareti dizisi (Don't, Rock'n'roll tek kelime).
   const WORD = /[\p{L}\p{M}\p{N}'’]+/gu;
-  // Roma rakamları (II, IV, XII…) büyük harfle yazılır; tek "I" İngilizce zamir de
-  // olabilir, küçük "vi" İtalyanca kelime de.
+  // Roma rakamları (II, IV, XII…) büyük harfle yazılır. Tek "I" İngilizce zamir de
+  // olabilir; "vi" İtalyanca, Danca kelime de olduğundan yalnızca VI yazılmışsa rakamdır.
   const ROMAN = /^(?=[IVX]{2,}$)X{0,3}(?:IX|IV|V?I{0,3})$/;
   const roman = (w) => {
-    const up = w.replace(/[ıi]/g, 'I').toUpperCase();
-    return ROMAN.test(up) && (w === up || w !== 'vi') ? up : null;
+    const up = w.replace(/[ıiİ]/g, 'I').toUpperCase();
+    return ROMAN.test(up) && (up !== 'VI' || w === 'VI') ? up : null;
   };
+  // İki şarkıcı arasındaki "x" (EZHEL X MURDA) ve Roma rakamları dil ipucu değildir.
+  const neutral = (w) => Boolean(roman(w)) || /^[xX×]$/.test(w);
   const TR_LETTERS = /[ğĞışŞİçÇöÖüÜâÂîÎûÛ]/;
   // Türkçede bulunmayan harfler ve harf grupları: İngilizce, Fransızca, İtalyanca…
   // Sondaki "-s" çoğul eki (ANIMALS, HITS) de yabancılık işaretidir (Türkçede DERS, ŞANS, RAKS gibi r/n/k'den sonra gelir).
@@ -55,11 +57,11 @@ const TextCase = (() => {
     aretha billy billie joe jimmy jimi jim tom rod elton freddie mick keith roger neil eric dean sammy johnny
     chuck richard simon carly cher donna gloria barbra ella louis miles charlie jackson bowie prince beatles
     stones floyd zeppelin purple sabbath eagles abba boney smokie madonna presley lennon mccartney dylan sinatra
-    dalida milva mina harper campbell
+    dalida milva mina harper campbell amanda gianni morandi sylvie vartan jane birkin capitol celentano
     je tu nous vous les des une mon amour coeur chanson toujours jamais rien avec pour sous milord qui que quoi
     plus belle beau vie nuit jour soleil monde enfant enfants mademoiselle madame monsieur oui non c'est j'ai
     l'amour lo gli una uno che mio mia tuo tua amore cuore notte sole mare bella bello ciao canzone volare
-    sono io con per della nel nella dolce vita tutto tutti più sempre questo quando di los las amor corazón
+    sono io con per ti amo zingara zingaro della nel nella dolce vita tutto tutti più sempre questo quando di los las amor corazón
     por vida noche bésame mucho cielo quiero besos tengo siempre nunca die das und ich du nicht liebe mein
     meine ein eine ist mit für wie wir sie dich mich nacht herz lied lieder`));
   // Plak etiketleri: kelimenin kendisi yabancıdır ama bulunduğu adı yabancı yapmaz
@@ -75,7 +77,7 @@ const TextCase = (() => {
     ben sen biz siz onlar bunlar şunlar bana sana bize size beni seni bizi sizi benim senin bizim sizin
     kendi kendim kendin hepsi herkes hiç hep bir iki üç dört beş altı yedi sekiz dokuz yirmi otuz kırk elli
     altmış yetmiş seksen doksan yüz bin milyon ilk neden niçin niye nasıl nerede nereye nereden hangi kaç
-    ama fakat çünkü eğer belki sanki hani bile ancak yine gene artık şimdi daha çok pek gibi için kadar değil
+    ama fakat çünkü eğer belki sanki hani bile ancak yine artık şimdi daha çok pek gibi için kadar değil
     var yok evet hayır ile veya yahut ise işte öyle böyle şöyle bunu şunu onu buna şuna ona burada orada
     aşk sevda sevgi sevgili gönül gönl kalp yürek canan yar yâr dost arkadaş hasret özlem vuslat sıla ayrılık
     ayrı yalnız yalnızlık kader kısmet dert keder gam hüzün sitem vefa vefasız hayal rüya umut ümit mutlu
@@ -122,7 +124,7 @@ const TextCase = (() => {
     aylin aynur ayla ayşegül belgin berna burcu derya didem duygu elif esra filiz gülay gülden işıl meltem
     meral melek nilgün neslihan pınar şenay yeliz alpay atilla bora emrah ersin halil ilyas kamil metin
     muharrem mümtaz necati nihat ozan rafet recep rıza selim semih serkan tamer tayfun volkan yusuf
-    zülfü livaneli
+    zülfü livaneli çetin nilay tilki cevap
     ıslak ılgaz rıhtım matiz gripin pinhani manga pentagram`);
   // İki harfli kökler yalnızca ekleriyle tanınır (OLDU, ALDIM, ETTİ, DEDİ, ELLER).
   const SHORT_ROOTS = list('ol al et de ye iç aç uç el ay su öl');
@@ -182,9 +184,10 @@ const TextCase = (() => {
   }
 
   function isForeign(w) {
+    if (neutral(w)) return false;
     const l = lower(w);
     return FOREIGN_WORDS.has(l) || TAGS.has(l.replace(/\.$/, '')) || FOREIGN_LETTERS.test(l)
-      || FOREIGN_PARTS.test(l.replace(/'/g, '')) || (!TR_LETTERS.test(w) && hasHiatus(l) && !turkishRoot(w));
+      || FOREIGN_PARTS.test(l.replace(/'/g, '')) || /in'$/.test(l) || (!TR_LETTERS.test(w) && hasHiatus(l) && !turkishRoot(w));
   }
 
   // Kelimenin dil puanı: Türkçe ve yabancı ipuçları. ı ile i, İ ile I ayrılmaz:
@@ -193,7 +196,7 @@ const TextCase = (() => {
   // Fransızcada da olduğundan yarım puandır (MÖTLEY CRÜE).
   function score(w) {
     const l = fold(w);
-    if (TAGS.has(l.replace(/\.$/, ''))) return { tr: 0, en: 0 };
+    if (TAGS.has(l.replace(/\.$/, '')) || neutral(w)) return { tr: 0, en: 0 };
     let tr = 0;
     let en = 0;
     if (/[ğĞşŞ]/.test(w)) tr += 3;
@@ -201,7 +204,7 @@ const TextCase = (() => {
     const root = turkishRoot(w);
     if (root) tr += root.length >= 3 ? 2 : 1; // OL-DU, AL-AN, DE-MIŞ: iki harfli kök zayıf ipucu
     if (FOREIGN_LETTERS.test(l)) en += 3;
-    if (FOREIGN_WORDS.has(l)) en += 2;
+    if (FOREIGN_WORDS.has(l) || /in'$/.test(l)) en += 2;
     else if (!/[ğĞşŞ]/.test(w)) {
       const plain = fold(w).replace(/'/g, '');
       // Türkçe kelimeler ünsüz + y ile ya da çift ünsüzle bitmez (LONELY, KISS, BELL).
@@ -244,7 +247,7 @@ const TextCase = (() => {
   const isVarious = (artist) => VARIOUS.test(fold(artist).replace(/ç/g, 'c').replace(/ş/g, 's').replace(/[\s_-]+/g, ' ').trim());
   // Birlikte söyleyenlerde (TARKAN FEAT. WYCLEF JEAN, BARIŞ MANÇO & KURTALAN EKSPRES)
   // dil baştaki addan anlaşılır; o bir şey söylemiyorsa diğerlerinden biri Türkse Türkçe.
-  const TOGETHER = /\s+(?:feat\.?|ft\.?|featuring|with|vs\.?|ve|and)\s+|\s*[&,+/]\s*|\s*\(feat/i;
+  const TOGETHER = /\s+(?:feat\.?|ft\.?|featuring|with|vs\.?|ve|and|x|×)\s+|\s*[&,+/]\s*|\s*\(feat/i;
   function nameLanguage(name) {
     const [lead, ...others] = name.split(TOGETHER).map((part) => singerLanguage(evidence([part])));
     return lead ?? (others.includes('tr') ? 'tr' : null);
@@ -267,7 +270,9 @@ const TextCase = (() => {
   function forSinger(ctx, singer, song) {
     if (!ctx?.various || typeof singer !== 'string' || !singer.trim()) return ctx;
     const lang = nameLanguage(singer) ?? singerLanguage(evidence([singer, song]));
-    return lang && lang !== ctx.lang ? { ...ctx, ...evidence([singer, song]), lang } : ctx;
+    if (!lang) return ctx;
+    const own = evidence([singer, song]);
+    return lang !== ctx.lang ? { ...ctx, ...own, lang } : { ...ctx, turkish: own.turkish, foreign: own.foreign };
   }
 
   function vowelClass(c) {

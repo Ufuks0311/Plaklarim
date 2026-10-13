@@ -136,6 +136,11 @@ function normalizeRecord(input) {
 // mahsus namesBeforeCasing alanında saklanır (yedeğe de girer).
 const nameText = (r) => JSON.stringify([r.artist, r.album, r.genre, r.label, discsOf(r)]);
 function normalizeForStorage(record) {
+  // İlk sürümle düzeltilmiş plak, o sürümün kuralları (buyuk-harf-v1.js) yüklenemediyse
+  // olduğu gibi kalır; bir sonraki açılışta yeniden denenir.
+  if (record.namesBeforeCasing && (record.casingVersion || 0) < CASING_VERSION && typeof TextCaseV1 === 'undefined') {
+    return record;
+  }
   const fixed = normalizeRecord(record);
   if (!record.namesBeforeCasing && nameText(fixed) !== nameText(record)) {
     fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
