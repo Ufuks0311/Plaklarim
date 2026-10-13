@@ -34,9 +34,9 @@ Sanatçılar) her şarkı, söyleyeni yazılmışsa onun diliyle yazılır.
   "HAZIR MISIN" → "Hazır mısın").
 
 Daha önce kaydedilmiş plaklar uygulama açılınca bu biçime getirilir; ilk halleri
-yedek dosyasında da duran `namesBeforeCasing` alanında saklanır. Kurallar değişince,
-o zamandan beri elle değiştirilmemiş plakların adları bu ilk hallerinden yeniden
-düzeltilir.
+yedek dosyasında da duran `namesBeforeCasing` alanında saklanır. Kurallar değişince
+elle değiştirilmemiş adlar bu ilk hallerinden yeniden düzeltilir; elle düzeltilmiş
+adlara dokunulmaz.
 
 ## Kapaktan otomatik doldurma
 
