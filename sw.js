@@ -7,6 +7,7 @@ const FILES = [
   'styles.css',
   'db.js',
   'buyuk-harf.js',
+  'buyuk-harf-v1.js',
   'app.js',
   'katman.js',
   'kamera.js',

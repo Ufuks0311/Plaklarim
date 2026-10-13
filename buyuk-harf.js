@@ -55,7 +55,8 @@ const TextCase = (() => {
     aretha billy billie joe jimmy jimi jim tom rod elton freddie mick keith roger neil eric dean sammy johnny
     chuck richard simon carly cher donna gloria barbra ella louis miles charlie jackson bowie prince beatles
     stones floyd zeppelin purple sabbath eagles abba boney smokie madonna presley lennon mccartney dylan sinatra
-    je tu nous vous les des une mon amour coeur chanson toujours jamais rien avec dans pour sous qui que quoi
+    dalida milva mina harper campbell
+    je tu nous vous les des une mon amour coeur chanson toujours jamais rien avec pour sous milord qui que quoi
     plus belle beau vie nuit jour soleil monde enfant enfants mademoiselle madame monsieur oui non c'est j'ai
     l'amour lo gli una uno che mio mia tuo tua amore cuore notte sole mare bella bello ciao canzone volare
     sono io con per della nel nella dolce vita tutto tutti più sempre questo quando di los las amor corazón
@@ -120,7 +121,9 @@ const TextCase = (() => {
     gülseren yüksel şeşen erkan oğur yavuz bingöl ersoy akgün altan tanrıkulu sezgin topçu özgür uğur
     aylin aynur ayla ayşegül belgin berna burcu derya didem duygu elif esra filiz gülay gülden işıl meltem
     meral melek nilgün neslihan pınar şenay yeliz alpay atilla bora emrah ersin halil ilyas kamil metin
-    muharrem mümtaz necati nihat ozan rafet recep rıza selim semih serkan tamer tayfun volkan yusuf`);
+    muharrem mümtaz necati nihat ozan rafet recep rıza selim semih serkan tamer tayfun volkan yusuf
+    zülfü livaneli
+    ıslak ılgaz rıhtım matiz gripin pinhani manga pentagram`);
   // İki harfli kökler yalnızca ekleriyle tanınır (OLDU, ALDIM, ETTİ, DEDİ, ELLER).
   const SHORT_ROOTS = list('ol al et de ye iç aç uç el ay su öl');
   const SUFFIXES = list(`lar ler im um üm in un ün i u ü imiz umuz ümüz iniz unuz ünüz m n si su sü yi yu yü
@@ -141,6 +144,13 @@ const TextCase = (() => {
   const DICT = new Map();
   TR_WORDS.forEach((w) => { if (!DICT.has(fold(w))) DICT.set(fold(w), w); });
   const SHORT = new Set(SHORT_ROOTS);
+  // Türkçe harfler olmadan yazılmış uzun kökler (BARIS MANCO, MUSLUM GURSES → barış, müslüm).
+  // Kısa olanlar (ASK, DON, GUN, MARS) İngilizce kelimelerle karışacağından yok.
+  const ASCII_DICT = new Map();
+  TR_WORDS.forEach((w) => {
+    const a = fold(w).replace(/[şğçöü]/g, (c) => ({ ş: 's', ğ: 'g', ç: 'c', ö: 'o', ü: 'u' })[c]);
+    if (a.length >= 5 && !DICT.has(a) && !ASCII_DICT.has(a)) ASCII_DICT.set(a, w);
+  });
 
   // Kelime sözlükteki bir Türkçe kelimenin ekli hali mi? { root: sözlükteki yazılışı,
   // length: kökün kelimedeki harf sayısı } ya da null.
@@ -152,7 +162,7 @@ const TextCase = (() => {
     if (/^\p{L}+$/u.test(f)) {
       const find = (s, depth) => {
         if (depth === 0 || s.length >= 3) {
-          const hit = DICT.get(s) ?? (depth > 0 && MUTATE[s.at(-1)] ? DICT.get(s.slice(0, -1) + MUTATE[s.at(-1)]) : undefined);
+          const hit = DICT.get(s) ?? ASCII_DICT.get(s) ?? (depth > 0 && MUTATE[s.at(-1)] ? DICT.get(s.slice(0, -1) + MUTATE[s.at(-1)]) : undefined);
           if (hit) return { root: hit, length: s.length };
         }
         if (depth > 0 && s.length === 2 && SHORT.has(s) && f.length - s.length >= 2) return { root: s, length: 2 };
@@ -177,24 +187,25 @@ const TextCase = (() => {
       || FOREIGN_PARTS.test(l.replace(/'/g, '')) || (!TR_LETTERS.test(w) && hasHiatus(l) && !turkishRoot(w));
   }
 
-  // Kelimenin dil puanı: Türkçe ve yabancı ipuçları. ı ve İ sayılmaz: büyük
-  // harfle yazılmış adda I olarak dururlar ve düzeltince ortaya çıkarlar; puan,
+  // Kelimenin dil puanı: Türkçe ve yabancı ipuçları. ı ile i, İ ile I ayrılmaz:
+  // büyük harfle yazılmış adda I olarak dururlar ve düzeltince ortaya çıkarlar; puan,
   // dolayısıyla plağın dili, düzeltmeden sonra değişmemeli. ç, ö, ü Almanca ve
   // Fransızcada da olduğundan yarım puandır (MÖTLEY CRÜE).
   function score(w) {
-    const l = lower(w);
+    const l = fold(w);
     if (TAGS.has(l.replace(/\.$/, ''))) return { tr: 0, en: 0 };
     let tr = 0;
     let en = 0;
     if (/[ğĞşŞ]/.test(w)) tr += 3;
     else if (/[çÇöÖüÜâÂîÎûÛ]/.test(w)) tr += 0.5;
-    if (turkishRoot(w)) tr += 2;
+    const root = turkishRoot(w);
+    if (root) tr += root.length >= 3 ? 2 : 1; // OL-DU, AL-AN, DE-MIŞ: iki harfli kök zayıf ipucu
     if (FOREIGN_LETTERS.test(l)) en += 3;
     if (FOREIGN_WORDS.has(l)) en += 2;
     else if (!/[ğĞşŞ]/.test(w)) {
       const plain = fold(w).replace(/'/g, '');
       // Türkçe kelimeler ünsüz + y ile ya da çift ünsüzle bitmez (LONELY, KISS, BELL).
-      if (FOREIGN_PARTS.test(plain) || hasHiatus(l) || /[^aeiouy]y$|([^aeiou])\1$/.test(plain)) en += 1;
+      if (FOREIGN_PARTS.test(plain) || (hasHiatus(l) && !root) || /[^aeiouy]y$|([^aeiou])\1$/.test(plain)) en += 1;
     }
     return { tr, en };
   }
@@ -204,7 +215,7 @@ const TextCase = (() => {
   //  foreign: etiket olmayan yabancı kelime sayısı; turkish: Türkçe harfli kelime sayısı.
   //  tr, en: Türkçe ve yabancı dil puanları.
   function evidence(texts) {
-    const words = texts.flatMap((t) => (typeof t === 'string' ? t.match(WORD) || [] : []))
+    const words = texts.flatMap((t) => (typeof t === 'string' ? t.normalize('NFC').match(WORD) || [] : []))
       .filter((w) => /\p{L}/u.test(w));
     const ev = {
       dotless: words.some((w) => isAllCaps(w) && w.includes('İ')),
@@ -228,29 +239,35 @@ const TextCase = (() => {
     return null;
   }
 
-  // Karma plaklarda sanatçı yerine yazılanlar: dil şarkıları söyleyenlerden anlaşılır.
-  const VARIOUS = /^(?:various(?: artists)?|v\.? ?a\.?|cesitli(?: sanatcilar)?|karisik|karma|derleme|compilation)$/;
-  const isVarious = (artist) => VARIOUS.test(fold(artist).replace(/ç/g, 'c').replace(/ş/g, 's').trim());
+  // Karma plaklarda sanatçı yerine yazılanlar.
+  const VARIOUS = /^(?:various(?: artists?)?|v ?[./]? ?a\.?|cesitli(?: sanatcilar| sanatci)?|karisik(?: sanatcilar)?|karma|derleme|compilation)$/;
+  const isVarious = (artist) => VARIOUS.test(fold(artist).replace(/ç/g, 'c').replace(/ş/g, 's').replace(/[\s_-]+/g, ' ').trim());
+  // Birlikte söyleyenlerde (TARKAN FEAT. WYCLEF JEAN, BARIŞ MANÇO & KURTALAN EKSPRES)
+  // dil baştaki addan anlaşılır; o bir şey söylemiyorsa diğerlerinden biri Türkse Türkçe.
+  const TOGETHER = /\s+(?:feat\.?|ft\.?|featuring|with|vs\.?|ve|and)\s+|\s*[&,+/]\s*|\s*\(feat/i;
+  function nameLanguage(name) {
+    const [lead, ...others] = name.split(TOGETHER).map((part) => singerLanguage(evidence([part])));
+    return lead ?? (others.includes('tr') ? 'tr' : null);
+  }
 
   // Bir plağın ipuçları ve dili. songs: şarkıların adları ve söyleyenleri. Dil
   // şarkıcının adından bulunur; karma plakta (Çeşitli Sanatçılar) sanatçı ve albüm
   // adından. Bunlar bir şey söylemiyorsa plağın bütün adlarına bakılır; yabancı
   // ipuçları ağır basmıyorsa Türkçe.
   function context(artist, album, songs = []) {
-    const all = evidence([artist, album, ...songs]);
+    const all = evidence([artist, album, ...(Array.isArray(songs) ? songs : [])]);
     const various = typeof artist !== 'string' || !artist.trim() || isVarious(artist);
-    const own = singerLanguage(evidence(various ? [artist, album] : [artist]));
+    const own = various ? singerLanguage(evidence([artist, album])) : nameLanguage(artist);
     return { ...all, various, lang: own ?? (all.en >= 2 && all.en > all.tr ? 'en' : 'tr') };
   }
 
-  // Bir şarkının ipuçları. Söyleyeninin adı ayrıca yazılmış ve dili belliyse o dil;
-  // karma plakta söyleyenin adı bir şey söylemiyorsa şarkının adı da dikkate alınır.
-  // Yoksa plağın dili.
+  // Karma plakta bir şarkının ipuçları: söyleyeninin adı yazılmış ve dili belliyse
+  // (ad bir şey söylemiyorsa şarkının adıyla birlikte) o dil. Karma olmayan plakta
+  // ve söyleyeni yazılmamış şarkıda plağın dili.
   function forSinger(ctx, singer, song) {
-    if (typeof singer !== 'string' || !singer.trim()) return ctx;
-    const lang = singerLanguage(evidence([singer]))
-      ?? (ctx.various ? singerLanguage(evidence([singer, song])) : null);
-    return lang && lang !== ctx.lang ? { ...ctx, lang } : ctx;
+    if (!ctx?.various || typeof singer !== 'string' || !singer.trim()) return ctx;
+    const lang = nameLanguage(singer) ?? singerLanguage(evidence([singer, song]));
+    return lang && lang !== ctx.lang ? { ...ctx, ...evidence([singer, song]), lang } : ctx;
   }
 
   function vowelClass(c) {
@@ -417,9 +434,11 @@ const TextCase = (() => {
   const BREAK = /[:;()[\]{}/–—!?.]|\s-|-\s/;
 
   // ctx: aynı plağın context() ile çıkarılan ipuçları ve dili.
-  function title(text, ctx = context('', '')) {
-    if (typeof text !== 'string' || !text) return text;
-    const { lang } = ctx;
+  function title(input, ctx) {
+    if (typeof input !== 'string' || !input) return input;
+    const text = input.normalize('NFC');
+    const record = ctx || context('', '');
+    const { lang } = record;
     // Parantez içindeki etiketler (REMIX, CANLI) alanın ipuçlarını değiştirmez.
     const own = evidence([text.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')]);
     const tokens = [...text.matchAll(WORD)];
@@ -432,7 +451,7 @@ const TextCase = (() => {
       const after = text.slice(m.index + raw.length, tokens[i + 1]?.index ?? text.length);
       const starts = i === 0 || BREAK.test(before);
       const ends = i === tokens.length - 1 || BREAK.test(after);
-      let w = lang === 'en' ? englishWord(raw) : turkishWord(raw, own, ctx, prev);
+      let w = lang === 'en' ? englishWord(raw) : turkishWord(raw, own, record, prev);
       if (!starts) {
         const small = lang === 'en' ? w.toLowerCase() : w.toLocaleLowerCase('tr');
         if (lang === 'en' ? !ends && EN_MINOR.has(small) : TR_MINOR.has(small) || TR_QUESTION.test(small)) w = small;

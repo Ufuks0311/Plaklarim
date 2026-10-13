@@ -66,32 +66,47 @@ const casingContext = (artist, album, tracks) =>
 // Yazım kuralları değişince sürüm artar; eski sürümle düzeltilmiş plaklar
 // adların ilk hallerinden (namesBeforeCasing) yeniden düzeltilir.
 const CASING_VERSION = 2;
-// İlk sürüm (her kelimenin ilk harfi büyük) bu anda yayınlandı.
-const CASING_V1_AT = '2026-10-12T21:11:57Z';
 
-// Eski sürümle düzeltilmiş ve sonra elle değiştirilmemiş plakta adların ilk
-// halleri; eski kuralın yanlış seçtiği ı/i (Kadin) böylece yeniden hesaplanır.
-// Sonradan formda kaydedilmiş plakların adları kullanıcınındır, olduğu gibi kalır.
+// İlk sürümün (casingVersion alanı yok) kurallarıyla (buyuk-harf-v1.js) adların ilk
+// hallerinden çıkan yazım. Kayıttaki ad bununla aynıysa sonradan değiştirilmemiştir.
+function casingV1(before) {
+  const tracks = discsOf(before).flatMap((d) => d.sides.flat());
+  const ctx = TextCaseV1.evidence([before.artist, before.album, ...tracks.flatMap((t) => [t.title, t.artist])]);
+  const tc = (text) => TextCaseV1.title(text, ctx);
+  return {
+    artist: tc(before.artist),
+    album: tc(before.album),
+    genre: TextCaseV1.title(before.genre),
+    label: TextCaseV1.title(before.label, TextCaseV1.FOREIGN_NAME),
+    tracks: tracks.map((t) => ({ before: t, title: tc(t.title), artist: tc(t.artist) })),
+  };
+}
+
+// İlk sürümle düzeltilmiş plakta, o sürümün yazdığı gibi duran (elle
+// değiştirilmemiş) adların ilk halleri; eski kuralın yanlış seçtiği ı/i (Kadin)
+// böylece yeniden hesaplanır. Elle değiştirilmiş adlar ve yeni şarkılar olduğu gibi
+// kalır. Şarkılar yerleri değişmiş olsa da adlarından bulunur.
 function casingSource(record) {
   const before = record.namesBeforeCasing;
-  if (!before || (record.casingVersion || 0) >= CASING_VERSION) return record;
-  if (record.updatedAt && record.updatedAt >= CASING_V1_AT) return record;
-  const discs = discsOf(record);
-  const oldDiscs = discsOf(before);
-  const sameShape = discs.every((d, di) => d.sides.every((side, si) => side.length === oldDiscs[di]?.sides[si].length));
-  const keep = (key) => (key in before ? before[key] : record[key]);
+  if (!before || typeof before !== 'object' || (record.casingVersion || 0) >= CASING_VERSION) return record;
+  if (typeof TextCaseV1 === 'undefined') return record;
+  const v1 = casingV1(before);
+  const pick = (key) => (key in before && record[key] === v1[key] ? before[key] : record[key]);
+  const pool = [...v1.tracks];
   return {
     ...record,
-    artist: keep('artist'),
-    album: keep('album'),
-    genre: keep('genre'),
-    label: keep('label'),
-    discs: sameShape ? discs.map((d, di) => ({
-      sides: d.sides.map((side, si) => side.map((t, i) => {
-        const old = oldDiscs[di].sides[si][i];
-        return { ...t, title: old.title, artist: old.artist };
+    artist: pick('artist'),
+    album: pick('album'),
+    genre: pick('genre'),
+    label: pick('label'),
+    discs: discsOf(record).map((d) => ({
+      sides: d.sides.map((side) => side.map((t) => {
+        const i = t.title ? pool.findIndex((p) => p.title === t.title) : -1;
+        if (i < 0) return t;
+        const [p] = pool.splice(i, 1);
+        return { ...t, title: p.before.title, artist: t.artist === p.artist ? p.before.artist : t.artist };
       })),
-    })) : discs,
+    })),
   };
 }
 
@@ -119,10 +134,10 @@ function normalizeRecord(input) {
 
 // Kaydedilecek plak: adları düzeltilir; değişen adların ilk halleri bir kereye
 // mahsus namesBeforeCasing alanında saklanır (yedeğe de girer).
+const nameText = (r) => JSON.stringify([r.artist, r.album, r.genre, r.label, discsOf(r)]);
 function normalizeForStorage(record) {
   const fixed = normalizeRecord(record);
-  const names = (r) => JSON.stringify([r.artist, r.album, r.genre, r.label, discsOf(r)]);
-  if (!record.namesBeforeCasing && names(fixed) !== names(record)) {
+  if (!record.namesBeforeCasing && nameText(fixed) !== nameText(record)) {
     fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
       .filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
   }
@@ -355,21 +370,23 @@ function discEditor(disc, di) {
     </div>`;
 }
 
-function readTracks(fs) {
+// raw: adların yazıldığı (ya da okunduğu) hali, düzeltilmeden önce.
+function readTracks(fs, raw = false) {
   const letter = fs.dataset.side;
+  const text = (input) => (raw ? input.dataset.raw ?? input.value : input.value).trim();
   return [...fs.querySelectorAll('.track-row')]
     .map((row) => ({
       no: row.querySelector('.t-no').value.trim(),
-      title: row.querySelector('.t-title').value.trim(),
-      artist: row.querySelector('.t-artist').value.trim(),
+      title: text(row.querySelector('.t-title')),
+      artist: text(row.querySelector('.t-artist')),
     }))
     .filter((t) => t.title)
     .map((t, i) => ({ ...t, no: t.no || autoTrackNo(letter, i) }));
 }
 
-function readDiscs() {
+function readDiscs(raw = false) {
   return [...view.querySelectorAll('.disc-edit')].map((el) => ({
-    sides: [...el.querySelectorAll('.tracks')].map(readTracks),
+    sides: [...el.querySelectorAll('.tracks')].map((fs) => readTracks(fs, raw)),
   }));
 }
 
@@ -829,10 +846,11 @@ async function renderForm(id) {
   function normalizeFormText(skip = document.activeElement) {
     const form = document.getElementById('form');
     const field = (name) => rawText(form.elements[name]);
+    // Kaydedilirken adı boş satırlar atılır; plağın dili de onlarsız hesaplanır.
     const tracks = [...view.querySelectorAll('.track-row')].map((row) => ({
       title: rawText(row.querySelector('.t-title')),
       artist: rawText(row.querySelector('.t-artist')),
-    }));
+    })).filter((t) => t.title.trim());
     const context = casingContext(field('artist'), field('album'), tracks);
     view.querySelectorAll(TEXT_FIELDS).forEach((el) => {
       const raw = rawText(el);
@@ -864,6 +882,10 @@ async function renderForm(id) {
       errorEl.hidden = false;
       return;
     }
+    // Adların yazıldığı (ya da kapaktan okunduğu) hali; ilk hali saklanmamış plakta
+    // saklanır ki kurallar değişince bu halinden yeniden düzeltilebilsin.
+    const raw = (name) => (e.target.elements[name].dataset.raw ?? f.get(name)).trim();
+    const typed = { artist: raw('artist'), album: raw('album'), genre: raw('genre'), label: raw('label'), discs: readDiscs(true) };
     const record = normalizeRecord({
       id: r.id || DB.newId(),
       no: f.get('no').trim(),
@@ -881,6 +903,7 @@ async function renderForm(id) {
       ...(r.namesBeforeCasing && { namesBeforeCasing: r.namesBeforeCasing }),
       casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
+    if (!record.namesBeforeCasing && nameText(typed) !== nameText(record)) record.namesBeforeCasing = typed;
     await DB.put(record);
     toast('Kaydedildi');
     location.hash = `#/plak/${record.id}`;
@@ -950,6 +973,7 @@ document.getElementById('importInput').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (data.app !== 'plaklarim' || !Array.isArray(data.records)) throw new Error('Bu bir Plaklarım yedeği değil.');
+    await storedRecordsNormalized;
     if (!confirm(`${data.records.length} plak geri yüklensin mi? Aynı plaklar yedekteki haliyle güncellenir.`)) return;
     for (const r of data.records) {
       if (!r.id || !r.artist || !r.album) continue;
@@ -975,4 +999,6 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // Tarayıcıdan verilerin kalıcı saklanmasını iste (otomatik temizlenmesin).
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
-normalizeStoredRecords().finally(route);
+// Açılıştaki düzeltme bitmeden yedekten geri yükleme başlamaz (yazdıkları karışmasın).
+const storedRecordsNormalized = normalizeStoredRecords();
+storedRecordsNormalized.finally(route);
