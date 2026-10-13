@@ -54,16 +54,64 @@ function discsOf(record) {
 const allTracks = (record) => discsOf(record).flatMap((d) => d.sides.flat());
 
 // Sanatçı, albüm, tür, plak şirketi ve şarkı adları/söyleyenleri "Her Kelimenin
-// İlk Harfi Büyük" biçiminde saklanır. Notlar olduğu gibi kalır. Belirsiz i/ı
-// harfleri için plağın diğer adlarına bakılır. Plak şirketi (Philips, Columbia)
-// ve tür plağın adlarını etkilemez, kendi kelimelerine göre düzeltilir; plak
-// şirketinde ipucu yoksa yabancı ad sayılır. Eski sideA/sideB alanları da
-// discs yapısına çevrilir.
+// İlk Harfi Büyük" biçiminde saklanır: yabancı plaklarda İngilizce, yerli
+// plaklarda Türkçe kurallarla (bkz. buyuk-harf.js). Notlar olduğu gibi kalır.
+// Plağın dili şarkıcıya göre belirlenir; plağın bütün adları, tür ve plak şirketi
+// de, o dilin kuralıyla yazılır. Şarkıyı söyleyenin adı ayrıca yazılmışsa (karma
+// plaklar) şarkı onun diliyle yazılır. Belirsiz i/ı harfleri için plağın diğer
+// adlarına bakılır. Eski sideA/sideB alanları da discs yapısına çevrilir.
 const casingContext = (artist, album, tracks) =>
-  TextCase.evidence([artist, album, ...tracks.flatMap((t) => [t.title, t.artist])]);
-const caseLabel = (text) => TextCase.title(text, TextCase.FOREIGN_NAME);
+  TextCase.context(artist, album, tracks.flatMap((t) => [t.title, t.artist]));
 
-function normalizeRecord(record) {
+// Yazım kuralları değişince sürüm artar; eski sürümle düzeltilmiş plaklar
+// adların ilk hallerinden (namesBeforeCasing) yeniden düzeltilir.
+const CASING_VERSION = 2;
+
+// İlk sürümün (casingVersion alanı yok) kurallarıyla (buyuk-harf-v1.js) adların ilk
+// hallerinden çıkan yazım. Kayıttaki ad bununla aynıysa sonradan değiştirilmemiştir.
+function casingV1(before) {
+  const tracks = discsOf(before).flatMap((d) => d.sides.flat());
+  const ctx = TextCaseV1.evidence([before.artist, before.album, ...tracks.flatMap((t) => [t.title, t.artist])]);
+  const tc = (text) => TextCaseV1.title(text, ctx);
+  return {
+    artist: tc(before.artist),
+    album: tc(before.album),
+    genre: TextCaseV1.title(before.genre),
+    label: TextCaseV1.title(before.label, TextCaseV1.FOREIGN_NAME),
+    tracks: tracks.map((t) => ({ before: t, title: tc(t.title), artist: tc(t.artist) })),
+  };
+}
+
+// İlk sürümle düzeltilmiş plakta, o sürümün yazdığı gibi duran (elle
+// değiştirilmemiş) adların ilk halleri; eski kuralın yanlış seçtiği ı/i (Kadin)
+// böylece yeniden hesaplanır. Elle değiştirilmiş adlar ve yeni şarkılar olduğu gibi
+// kalır. Şarkılar yerleri değişmiş olsa da adlarından bulunur.
+function casingSource(record) {
+  const before = record.namesBeforeCasing;
+  if (!before || typeof before !== 'object' || (record.casingVersion || 0) >= CASING_VERSION) return record;
+  if (typeof TextCaseV1 === 'undefined') return record;
+  const v1 = casingV1(before);
+  const pick = (key) => (key in before && record[key] === v1[key] ? before[key] : record[key]);
+  const pool = [...v1.tracks];
+  return {
+    ...record,
+    artist: pick('artist'),
+    album: pick('album'),
+    genre: pick('genre'),
+    label: pick('label'),
+    discs: discsOf(record).map((d) => ({
+      sides: d.sides.map((side) => side.map((t) => {
+        const i = t.title ? pool.findIndex((p) => p.title === t.title) : -1;
+        if (i < 0) return t;
+        const [p] = pool.splice(i, 1);
+        return { ...t, title: p.before.title, artist: t.artist === p.artist ? p.before.artist : t.artist };
+      })),
+    })),
+  };
+}
+
+function normalizeRecord(input) {
+  const record = casingSource(input);
   const discs = discsOf(record);
   const context = casingContext(record.artist, record.album, discs.flatMap((d) => d.sides.flat()));
   const tc = (text) => TextCase.title(text, context);
@@ -72,26 +120,43 @@ function normalizeRecord(record) {
     ...rest,
     artist: tc(record.artist),
     album: tc(record.album),
-    genre: TextCase.title(record.genre),
-    label: caseLabel(record.label),
+    genre: tc(record.genre),
+    label: tc(record.label),
     discs: discs.map((d) => ({
-      sides: d.sides.map((side) => side.map((t) => ({ ...t, title: tc(t.title), artist: tc(t.artist) }))),
+      sides: d.sides.map((side) => side.map((t) => {
+        const song = TextCase.forSinger(context, t.artist, t.title);
+        return { ...t, title: TextCase.title(t.title, song), artist: TextCase.title(t.artist, song) };
+      })),
     })),
+    casingVersion: CASING_VERSION,
   };
 }
 
-// Daha önce kaydedilmiş plakları bu biçime getirir; değişmeyenlere dokunmaz.
-// Değişen plakların ilk halleri namesBeforeCasing alanında saklanır (yedeğe de girer).
+// Kaydedilecek plak: adları düzeltilir; değişen adların ilk halleri bir kereye
+// mahsus namesBeforeCasing alanında saklanır (yedeğe de girer).
+const nameText = (r) => JSON.stringify([r.artist, r.album, r.genre, r.label, discsOf(r)]);
+function normalizeForStorage(record) {
+  // İlk sürümle düzeltilmiş plak, o sürümün kuralları (buyuk-harf-v1.js) yüklenemediyse
+  // olduğu gibi kalır; bir sonraki açılışta yeniden denenir.
+  if (record.namesBeforeCasing && (record.casingVersion || 0) < CASING_VERSION && typeof TextCaseV1 === 'undefined') {
+    return record;
+  }
+  const fixed = normalizeRecord(record);
+  if (!record.namesBeforeCasing && nameText(fixed) !== nameText(record)) {
+    fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
+      .filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
+  }
+  return fixed;
+}
+
+// Daha önce kaydedilmiş plakları bu biçime getirir; bu sürümle düzeltilmiş ya da
+// değişmeyen plaklara dokunmaz.
 async function normalizeStoredRecords() {
   try {
     for (const record of await DB.all()) {
-      const fixed = normalizeRecord(record);
-      if (JSON.stringify(fixed) === JSON.stringify(record)) continue;
-      if (!record.namesBeforeCasing) {
-        fixed.namesBeforeCasing = Object.fromEntries(['artist', 'album', 'genre', 'label', 'sideA', 'sideB', 'discs']
-          .filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
-      }
-      await DB.put(fixed);
+      if ((record.casingVersion || 0) >= CASING_VERSION) continue;
+      const fixed = normalizeForStorage(record);
+      if (JSON.stringify(fixed) !== JSON.stringify(record)) await DB.put(fixed);
     }
   } catch (err) {
     console.error(err);
@@ -310,21 +375,23 @@ function discEditor(disc, di) {
     </div>`;
 }
 
-function readTracks(fs) {
+// raw: adların yazıldığı (ya da okunduğu) hali, düzeltilmeden önce.
+function readTracks(fs, raw = false) {
   const letter = fs.dataset.side;
+  const text = (input) => (raw ? input.dataset.raw ?? input.value : input.value).trim();
   return [...fs.querySelectorAll('.track-row')]
     .map((row) => ({
       no: row.querySelector('.t-no').value.trim(),
-      title: row.querySelector('.t-title').value.trim(),
-      artist: row.querySelector('.t-artist').value.trim(),
+      title: text(row.querySelector('.t-title')),
+      artist: text(row.querySelector('.t-artist')),
     }))
     .filter((t) => t.title)
     .map((t, i) => ({ ...t, no: t.no || autoTrackNo(letter, i) }));
 }
 
-function readDiscs() {
+function readDiscs(raw = false) {
   return [...view.querySelectorAll('.disc-edit')].map((el) => ({
-    sides: [...el.querySelectorAll('.tracks')].map(readTracks),
+    sides: [...el.querySelectorAll('.tracks')].map((fs) => readTracks(fs, raw)),
   }));
 }
 
@@ -784,15 +851,17 @@ async function renderForm(id) {
   function normalizeFormText(skip = document.activeElement) {
     const form = document.getElementById('form');
     const field = (name) => rawText(form.elements[name]);
+    // Kaydedilirken adı boş satırlar atılır; plağın dili de onlarsız hesaplanır.
     const tracks = [...view.querySelectorAll('.track-row')].map((row) => ({
       title: rawText(row.querySelector('.t-title')),
       artist: rawText(row.querySelector('.t-artist')),
-    }));
+    })).filter((t) => t.title.trim());
     const context = casingContext(field('artist'), field('album'), tracks);
     view.querySelectorAll(TEXT_FIELDS).forEach((el) => {
       const raw = rawText(el);
-      const cased = el.name === 'genre' ? TextCase.title(raw)
-        : el.name === 'label' ? caseLabel(raw) : TextCase.title(raw, context);
+      const row = el.closest('.track-row');
+      const song = row && TextCase.forSinger(context, rawText(row.querySelector('.t-artist')), rawText(row.querySelector('.t-title')));
+      const cased = TextCase.title(raw, song || context);
       if (el === skip) return;
       el.dataset.cased = cased;
       if (el.value !== cased) el.value = cased;
@@ -818,6 +887,10 @@ async function renderForm(id) {
       errorEl.hidden = false;
       return;
     }
+    // Adların yazıldığı (ya da kapaktan okunduğu) hali; ilk hali saklanmamış plakta
+    // saklanır ki kurallar değişince bu halinden yeniden düzeltilebilsin.
+    const raw = (name) => (e.target.elements[name].dataset.raw ?? f.get(name)).trim();
+    const typed = { artist: raw('artist'), album: raw('album'), genre: raw('genre'), label: raw('label'), discs: readDiscs(true) };
     const record = normalizeRecord({
       id: r.id || DB.newId(),
       no: f.get('no').trim(),
@@ -833,7 +906,9 @@ async function renderForm(id) {
       createdAt: r.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...(r.namesBeforeCasing && { namesBeforeCasing: r.namesBeforeCasing }),
+      casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
+    if (!record.namesBeforeCasing && nameText(typed) !== nameText(record)) record.namesBeforeCasing = typed;
     await DB.put(record);
     toast('Kaydedildi');
     location.hash = `#/plak/${record.id}`;
@@ -903,10 +978,11 @@ document.getElementById('importInput').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (data.app !== 'plaklarim' || !Array.isArray(data.records)) throw new Error('Bu bir Plaklarım yedeği değil.');
+    await storedRecordsNormalized;
     if (!confirm(`${data.records.length} plak geri yüklensin mi? Aynı plaklar yedekteki haliyle güncellenir.`)) return;
     for (const r of data.records) {
       if (!r.id || !r.artist || !r.album) continue;
-      await DB.put(normalizeRecord({
+      await DB.put(normalizeForStorage({
         ...r,
         frontCover: r.frontCover ? await dataUrlToBlob(r.frontCover) : null,
         backCover: r.backCover ? await dataUrlToBlob(r.backCover) : null,
@@ -928,4 +1004,6 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // Tarayıcıdan verilerin kalıcı saklanmasını iste (otomatik temizlenmesin).
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
-normalizeStoredRecords().finally(route);
+// Açılıştaki düzeltme bitmeden yedekten geri yükleme başlamaz (yazdıkları karışmasın).
+const storedRecordsNormalized = normalizeStoredRecords();
+storedRecordsNormalized.finally(route);
