@@ -17,8 +17,13 @@
 const TextCase = (() => {
   // Kelime: harf, rakam ve kesme işareti dizisi (Don't, Rock'n'roll tek kelime).
   const WORD = /[\p{L}\p{M}\p{N}'’]+/gu;
-  // Roma rakamları (II, IV, XII…) büyük harfle kalır; tek "I" İngilizce zamir de olabilir.
+  // Roma rakamları (II, IV, XII…) büyük harfle yazılır; tek "I" İngilizce zamir de
+  // olabilir, küçük "vi" İtalyanca kelime de.
   const ROMAN = /^(?=[IVX]{2,}$)X{0,3}(?:IX|IV|V?I{0,3})$/;
+  const roman = (w) => {
+    const up = w.replace(/[ıi]/g, 'I').toUpperCase();
+    return ROMAN.test(up) && (w === up || w !== 'vi') ? up : null;
+  };
   const TR_LETTERS = /[ğĞışŞİçÇöÖüÜâÂîÎûÛ]/;
   // Türkçede bulunmayan harfler ve harf grupları: İngilizce, Fransızca, İtalyanca…
   // Sondaki "-s" çoğul eki (ANIMALS, HITS) de yabancılık işaretidir (Türkçede DERS, ŞANS, RAKS gibi r/n/k'den sonra gelir).
@@ -33,6 +38,7 @@ const TextCase = (() => {
   // oh, hey, can, on, son, of, be, ton, un, para, sol, il, el, mi, de, da, ne, ya…) yok.
   const FOREIGN_WORDS = new Set(list(`
     the and you your yours my me mine i i'm i'll i've i'd it it's is am are was were been to in into with
+    hip skit diss
     without from for all this that these those what what's when where why who how which there here then than
     so up down out over under about after again ain't always any baby back bad because before best better
     between blue bring call can't change city come cry dance dancing day days dear did do does don't done dream
@@ -107,7 +113,14 @@ const TextCase = (() => {
     besen ışın türkan şükrü ercan saygın selami
     mazi aziz cahil nikâh kıl şık ıssız allahaısmarladık mihriban arif timur nida sipahi kırmızıgül aldinç
     kitap hakikat hakiki talihsiz sahil rakip şahit nasip yarabbi hicaz hicazkâr kiralık semiramis ziynet
-    hayli zalim kalbi itiraz ihtimal semiha mediha feriha rabia yankı`);
+    hayli zalim kalbi itiraz ihtimal semiha mediha feriha rabia yankı şikayet
+    kerem hadise gülşen demet candan kenan murat ebru zuhal emre gökhan özcan teoman şebnem harun cengiz
+    levent serdar onur kıraç haluk mabel ferhat göçer evgin nükhet fatih kutlu ümit bengü kubat sinan akçıl
+    akalın bayraktar sıla gençoğlu ceza sagopa kajmer şanışer ezhel görsev mercan dede erener doğulu tüzün
+    gülseren yüksel şeşen erkan oğur yavuz bingöl ersoy akgün altan tanrıkulu sezgin topçu özgür uğur
+    aylin aynur ayla ayşegül belgin berna burcu derya didem duygu elif esra filiz gülay gülden işıl meltem
+    meral melek nilgün neslihan pınar şenay yeliz alpay atilla bora emrah ersin halil ilyas kamil metin
+    muharrem mümtaz necati nihat ozan rafet recep rıza selim semih serkan tamer tayfun volkan yusuf`);
   // İki harfli kökler yalnızca ekleriyle tanınır (OLDU, ALDIM, ETTİ, DEDİ, ELLER).
   const SHORT_ROOTS = list('ol al et de ye iç aç uç el ay su öl');
   const SUFFIXES = list(`lar ler im um üm in un ün i u ü imiz umuz ümüz iniz unuz ünüz m n si su sü yi yu yü
@@ -361,7 +374,7 @@ const TextCase = (() => {
 
   // Türkçe kurallarla bir kelime.
   function turkishWord(w, field, record, prev) {
-    if (ROMAN.test(w)) return w;
+    if (roman(w)) return roman(w);
     const chars = Array.from(w);
     const first = chars.findIndex((c) => /\p{L}/u.test(c));
     // Rakamla başlayan kelimeler (2nd, 70'ler) büyük harfle başlamaz.
@@ -384,7 +397,7 @@ const TextCase = (() => {
 
   // İngilizce kurallarla bir kelime: I küçülünce i, i büyüyünce I.
   function englishWord(w) {
-    if (ROMAN.test(w)) return w;
+    if (roman(w)) return roman(w);
     const chars = Array.from(w);
     const first = chars.findIndex((c) => /\p{L}/u.test(c));
     const capital = first >= 0 && !/\p{N}/u.test(chars.slice(0, first).join(''));
