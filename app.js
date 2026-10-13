@@ -206,9 +206,13 @@ window.addEventListener('hashchange', () => route());
 // ---------- Liste ----------
 
 let lastQuery = '';
+// Liste ekranı açıkken internetten gelen değişiklikleri, arama kutusuna dokunmadan
+// listeye yansıtır.
+let refreshList = null;
 
 async function renderList() {
-  const records = (await DB.all()).sort(byRecordOrder);
+  refreshList = null;
+  let records = (await DB.all()).sort(byRecordOrder);
   const viewer = Cloud.viewer();
   const cloud = Cloud.info();
   view.innerHTML = `
@@ -228,7 +232,7 @@ async function renderList() {
   if (!records.length) {
     count.textContent = '';
     grid.outerHTML = viewer
-      ? `<div class="empty"><p>${Cloud.status().state === 'ok' ? 'Listede henüz plak yok.' : 'Plaklar yükleniyor…'}</p></div>`
+      ? `<div class="empty"><p>${esc({ ok: 'Listede henüz plak yok.', error: Cloud.status().text }[Cloud.status().state] || 'Plaklar yükleniyor…')}</p></div>`
       : `<div class="empty">
       <p>Henüz plak eklemedin.</p>
       <p><a href="#/yeni" class="btn primary">İlk plağı ekle</a></p>
@@ -237,7 +241,7 @@ async function renderList() {
     return;
   }
 
-  const thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
+  let thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
 
   function draw() {
     const term = q.value.trim().toLocaleLowerCase('tr');
@@ -265,6 +269,17 @@ async function renderList() {
 
   q.addEventListener('input', draw);
   draw();
+
+  refreshList = async () => {
+    const fresh = (await DB.all()).sort(byRecordOrder);
+    if (!grid.isConnected) return;
+    if (!fresh.length) { route({ keepScroll: true }); return; }
+    const old = thumbs;
+    records = fresh;
+    thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
+    draw();
+    old.forEach((url) => url && URL.revokeObjectURL(url));
+  };
 }
 
 // ---------- Detay ----------
@@ -294,9 +309,11 @@ async function renderDetail(id) {
     .filter(([, blob]) => blob)
     .map(([label, blob]) => {
       const url = blobUrl(blob);
+      // Büyütmek için yeni sekmede yalnızca düz resimler açılır (SVG betik taşıyabilir).
+      const img = `<img src="${url}" alt="${label}">`;
       return `
       <figure>
-        <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${label}"></a>
+        ${/^image\/(jpeg|png|webp|gif)$/i.test(blob.type) ? `<a href="${url}" target="_blank" rel="noopener">${img}</a>` : img}
         <figcaption>${label}</figcaption>
       </figure>`;
     }).join('');
@@ -924,6 +941,20 @@ async function renderForm(id) {
       casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
     if (!record.namesBeforeCasing && nameText(typed) !== nameText(record)) record.namesBeforeCasing = typed;
+    // Form açıkken plak başka bir cihazda değiştirildiyse (eşitlemeyle geldi), burada
+    // değiştirilmeyen alanlar ve kapaklar o yeni halinden alınır.
+    const current = existing && await DB.get(existing.id);
+    if (current && current.updatedAt !== existing.updatedAt) {
+      const same = (a, b) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
+      ['no', 'artist', 'album', 'year', 'genre', 'label', 'notes'].forEach((k) => {
+        if (same(record[k], existing[k])) record[k] = current[k];
+      });
+      if (same(record.discs, discsOf(existing))) record.discs = discsOf(current);
+      ['frontCover', 'backCover'].forEach((k) => {
+        if (images[k] === (existing[k] || null)) record[k] = current[k] || null;
+      });
+      if (current.namesBeforeCasing && !existing.namesBeforeCasing) record.namesBeforeCasing = current.namesBeforeCasing;
+    }
     await DB.put(record);
     toast('Kaydedildi');
     location.hash = `#/plak/${record.id}`;
@@ -933,7 +964,11 @@ async function renderForm(id) {
 // ---------- Menü: yedekleme ----------
 
 const menu = document.getElementById('menu');
-function closeMenu() { menu.hidden = true; }
+function closeMenu() {
+  if (menu.hidden) return;
+  menu.hidden = true;
+  if (refreshPending) setTimeout(refreshFromRemote, 0);
+}
 // İzlenen listede plak eklenmez, kapak okunmaz, yedek geri yüklenmez.
 if (Cloud.viewer()) {
   menu.querySelector('[data-action=reader]').hidden = true;
@@ -1079,12 +1114,15 @@ function renderCloud() {
           </form>
           <p class="error" id="connectError" hidden></p>
           <p class="hint">Anahtar yalnızca bu cihazda saklanır. Diğer cihazlarında anahtar yerine, bağlı
-            cihazdan paylaştığın bağlantıyı açman ya da buraya yapıştırman yeterli.</p></li>
+            cihazdan paylaştığın bağlantıyı açman ya da buraya yapıştırman yeterli. Birinin
+            gönderdiği izleme bağlantısını da buraya yapıştırabilirsin.</p></li>
       </ol>`;
   } else if (info.mode === 'viewer') {
     body = `
       <p>Bu cihazda <b>${esc(info.owner)}</b> kullanıcısının plak listesini izliyorsun. Listeyi
         görebilirsin ama değiştiremezsin; her açılışta güncellenir.</p>
+      <p class="hint">Uygulamayı ana ekrana eklediysen orada liste boş görünür; aldığın bağlantıyı
+        oradaki ⋮ → İnternette saklama sayfasına yapıştır.</p>
       <p class="cloud-status" id="cloudStatus"></p>
       <div class="actions">
         <button class="btn" id="syncNow">Şimdi yenile</button>
@@ -1096,6 +1134,16 @@ function renderCloud() {
         değişiklikler kendiliğinden eşitlenir.</p>
       <p class="cloud-status" id="cloudStatus"></p>
       <button class="btn" id="syncNow">Şimdi eşitle</button>
+      <details class="renew"${[401, 403, 404].includes(Cloud.status().code) ? ' open' : ''}>
+        <summary>Anahtarı yenile</summary>
+        <p class="hint">Anahtar silindiyse ya da çalışmıyorsa <a href="${links.writeToken}" ${ext}>yeni anahtar oluştur</a>
+          (<b>Only select repositories</b> → <b>${repo}</b>) ve buraya yapıştır.</p>
+        <form class="cloud-form" id="connectForm">
+          <input id="connectInput" ${TOKEN_INPUT} aria-label="Yeni anahtar">
+          <button class="btn primary">Kaydet</button>
+        </form>
+        <p class="error" id="connectError" hidden></p>
+      </details>
 
       <section>
         <h2>Başka bir cihazını bağla</h2>
@@ -1121,7 +1169,8 @@ function renderCloud() {
             <p class="error" id="viewError" hidden></p></li>
         </ol>
         <p class="hint">Kimse görmesin istersen GitHub'daki <a href="${links.tokens}" ${ext}>anahtarlar</a>
-          sayfasından okuma anahtarını sil; o anahtarla verilen bütün izleme bağlantıları çalışmaz olur.</p>
+          sayfasından okuma anahtarını sil; o anahtarla verilen bütün izleme bağlantıları çalışmaz olur ve
+          liste izleyenlerin cihazından, uygulamayı bir sonraki açışlarında silinir.</p>
       </section>
 
       <section>
@@ -1207,22 +1256,29 @@ function showCloudStatus(st = Cloud.status()) {
     el.textContent = text;
     el.classList.toggle('error', st.state === 'error');
   }
+  // Anahtar çalışmıyorsa yenileme alanı kendiliğinden açılır.
+  const renew = view.querySelector('details.renew');
+  if (renew && st.state === 'error' && [401, 403, 404].includes(st.code)) renew.open = true;
 }
+// İnternetten gelen değişiklikler ekrana yansır. Liste yerinde yenilenir (arama
+// sürerken de); plak sayfası menü kapanınca yenilenir; düzenleme formuna
+// dokunulmaz (kaydederken başka cihazdaki değişiklikler korunur).
+let refreshPending = false;
+function refreshFromRemote() {
+  const page = currentPage();
+  if (page === 'yeni' || page === 'duzenle' || page === 'bulut') return;
+  if (page === '' && refreshList) { refreshList(); return; }
+  if (!menu.hidden) { refreshPending = true; return; }
+  refreshPending = false;
+  route({ keepScroll: true });
+}
+Cloud.onRemoteChange(refreshFromRemote);
 Cloud.onStatus((st) => {
   showCloudStatus(st);
-  // İzlenen liste ilk kez boş geldiyse "yükleniyor" yazısı kalkar.
-  if (st.state === 'ok' && Cloud.viewer() && currentPage() === '' && view.querySelector('.empty')) route({ keepScroll: true });
+  // İzlenen liste boşken "yükleniyor" yazısı eşitleme bitince güncellenir.
+  if (['ok', 'error'].includes(st.state) && Cloud.viewer() && currentPage() === '' && !refreshList) refreshFromRemote();
 });
 window.addEventListener('hashchange', () => showCloudStatus());
-
-// İnternetten gelen değişiklikler ekrana yansır; plak düzenlenirken ya da
-// arama yazılırken ekran yenilenmez.
-Cloud.onRemoteChange(() => {
-  const page = currentPage();
-  if (page === 'yeni' || page === 'duzenle' || page === 'bulut' || !menu.hidden) return;
-  if (document.activeElement?.matches('input, textarea, select')) return;
-  route({ keepScroll: true });
-});
 
 // ---------- Başlat ----------
 

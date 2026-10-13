@@ -64,10 +64,13 @@ h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: 
 .cloud[data-state=offline] { opacity: .45; }
 @keyframes cloud-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .cloud[data-state=busy] { animation: none; } }
+.topbar { flex-wrap: wrap; }
+.menu { z-index: 1; }
+/* Uzun işlemlerde ve hatada üst çubuğun altında; sayfayı aşağı iter, üstünü örtmez. */
 .cloud-line {
-  position: absolute; left: 0; right: 0; top: 100%;
+  flex: 0 0 calc(100% + 2rem); margin: .6rem -1rem -.6rem;
   padding: .35rem 1rem; text-align: center; font-size: .8rem; text-decoration: none;
-  color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--line);
+  color: var(--muted); background: var(--surface); border-top: 1px solid var(--line);
 }
 .cloud-line.error { color: var(--danger); }
 
@@ -285,3 +288,5 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
   flex: 1; min-width: 0; padding: .65rem .8rem; font: inherit; color: var(--text);
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
 }
+.renew { margin-top: .75rem; }
+.renew summary { cursor: pointer; color: var(--accent); font-size: .9rem; }

@@ -71,17 +71,24 @@ const Cloud = (() => {
   // Bağlantılar: #/bagla/<…> sahibin başka cihazını bağlar (yazma anahtarı),
   // #/izle/<…> izleme bağlantısıdır (okuma anahtarı).
   const b64url = (text) => btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  // Cihaz bağlantısı varsa izleme anahtarını da taşır; diğer cihazlar da izleme
+  // bağlantısını paylaşabilir.
   function linkFor(kind, c, token) {
-    const payload = b64url(JSON.stringify({ o: c.owner, r: c.repo, b: c.branch, t: token }));
+    const extra = kind === 'bagla' && c.viewToken ? { v: c.viewToken } : {};
+    const payload = b64url(JSON.stringify({ o: c.owner, r: c.repo, b: c.branch, t: token, ...extra }));
     return `${location.origin}${location.pathname}#/${kind}/${payload}`;
   }
   const LINK = /#\/(bagla|izle)\/([A-Za-z0-9_-]+)/;
+  // Adres çubuğunda yalnızca adresin tamamı bağlantıysa (bir plağın kimliğinin
+  // içine gizlenmiş bağlantı sayılmaz).
+  const HASH_LINK = /^#\/(bagla|izle)\/([A-Za-z0-9_-]+)$/;
   function parseLink(text) {
     const m = String(text || '').match(LINK);
     if (!m) return null;
     try {
       const p = JSON.parse(atob(m[2].replace(/-/g, '+').replace(/_/g, '/')));
       const c = { mode: m[1] === 'bagla' ? 'owner' : 'viewer', owner: p.o, repo: p.r, branch: p.b, token: p.t };
+      if (c.mode === 'owner' && TOKEN.test(p.v || '')) c.viewToken = p.v;
       return valid(c) ? c : null;
     } catch {
       return null;
@@ -113,26 +120,48 @@ const Cloud = (() => {
         notice = 'Bu cihaz zaten bağlı.';
         return false;
       }
-      saveConfig({ ...link, ...(config?.mode === 'owner' && sameRepo(config, link) && config.viewToken && { viewToken: config.viewToken }) });
+      const viewToken = link.viewToken || (config?.mode === 'owner' && sameRepo(config, link) && config.viewToken);
+      saveConfig({ ...link, ...(viewToken && { viewToken }) });
       notice = 'Bu cihaz bağlandı; plaklar eşitleniyor.';
     }
     return dbName() !== before;
   }
 
+  // Adres çubuğundan gelen bağlantı (biri göndermiş olabilir) sorulmadan
+  // kullanılmaz: başkasının listesine bağlanmak bu cihazdaki plakları oraya yükler.
+  function confirmLink(link) {
+    if (!link || (config && sameRepo(config, link) && config.mode === link.mode)) return true;
+    if (link.mode === 'owner') {
+      return confirm(`Bu cihaz ${link.owner} kullanıcısının plak listesine bağlanacak; bu cihazdaki plaklar da o listeye eklenecek.`
+        + (config?.mode === 'owner' ? ` Şu anki bağlantın (${config.owner}/${config.repo}) kesilecek.` : '')
+        + '\n\nBağlantıyı sen gönderdiysen "Tamam"a bas.');
+    }
+    if (config?.mode === 'owner') {
+      return confirm(`${link.owner} kullanıcısının plakları bu cihazda gösterilecek (yalnızca görüntüleme). `
+        + 'Kendi plakların silinmez; "İzlemeyi bırak" ile geri dönersin. Devam edilsin mi?');
+    }
+    return true;
+  }
+
   // Adres çubuğundaki bağlantı alınır ve geçmişten silinir (anahtar orada kalmasın).
   function takeLinkFromAddress() {
-    if (!LINK.test(location.hash)) return false;
+    if (!HASH_LINK.test(location.hash)) return false;
     const link = parseLink(location.hash);
     history.replaceState(null, '', `${location.pathname}${location.search}#/${link?.mode === 'viewer' ? '' : 'bulut'}`);
+    if (!confirmLink(link)) {
+      notice = 'Bağlantı kullanılmadı.';
+      return false;
+    }
     return applyLink(link);
   }
 
-  // Sayfa açılırken: veritabanı daha açılmadı, doğrudan seçilir.
-  takeLinkFromAddress();
+  // Sayfa açılırken: veritabanı daha açılmadı, doğrudan seçilir. İzlemeden
+  // kendi listesine geçen cihazda izlenen liste silinir.
+  if (takeLinkFromAddress() && dbName() === OWN_DB) indexedDB.deleteDatabase(VIEW_DB);
   DB.useName(dbName());
   // Uygulama açıkken bağlantı açılırsa (app.js'in yönlendirmesinden önce çalışır).
   window.addEventListener('hashchange', async () => {
-    if (!LINK.test(location.hash)) return;
+    if (!HASH_LINK.test(location.hash)) return;
     const viewerBefore = config?.mode === 'viewer';
     if (takeLinkFromAddress()) {
       if (viewerBefore) await DB.clearAll().catch(console.error); // izlenen liste bırakıldı
@@ -144,12 +173,29 @@ const Cloud = (() => {
 
   // ---------- GitHub ----------
 
+  // GitHub'ın sınırları: saatte 5000 istek (sahibin bütün anahtarları, izleme
+  // bağlantıları dahil, birlikte sayılır) ve kısa sürede çok yazma ("secondary").
   class ApiError extends Error {
     constructor(status, message, headers) {
       super(message);
       this.status = status;
-      this.rateLimited = status === 429 || (status === 403 && headers?.get('x-ratelimit-remaining') === '0');
+      this.rateLimited = status === 429 || (status === 403 && (headers?.get('x-ratelimit-remaining') === '0'
+        || headers?.has('retry-after') || /rate limit|abuse/i.test(message || '')));
+      const after = Number(headers?.get('retry-after'));
+      const reset = Number(headers?.get('x-ratelimit-reset'));
+      this.retryAt = after ? Date.now() + after * 1000
+        : headers?.get('x-ratelimit-remaining') === '0' && reset ? reset * 1000 : 0;
     }
+  }
+
+  const rate = { remaining: null, reset: 0 };
+  const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+  // Yazma istekleri arasında kısa bir ara (GitHub'ın önerisi).
+  let lastWrite = 0;
+  async function pace() {
+    const wait = lastWrite + 800 - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastWrite = Date.now();
   }
 
   // path '/' ile başlıyorsa API köküne, değilse deponun altına gider.
@@ -158,6 +204,7 @@ const Cloud = (() => {
   async function github(c, path, { method = 'GET', body, raw = false, token = c.token, fresh = true } = {}) {
     const base = `${API}/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`;
     const url = path.startsWith('/') ? API + path : path ? `${base}/${path}` : base;
+    if (method !== 'GET') await pace();
     let res;
     try {
       res = await fetch(url, {
@@ -173,6 +220,10 @@ const Cloud = (() => {
     } catch {
       throw new ApiError(0, 'GitHub\'a ulaşılamadı.');
     }
+    if (res.headers.has('x-ratelimit-remaining')) {
+      rate.remaining = Number(res.headers.get('x-ratelimit-remaining'));
+      rate.reset = Number(res.headers.get('x-ratelimit-reset')) * 1000 || 0;
+    }
     if (!res.ok) {
       let data = {};
       try { data = await res.json(); } catch { /* gövde yok */ }
@@ -182,21 +233,26 @@ const Cloud = (() => {
     return res.status === 204 ? null : res.json();
   }
 
-  function explain(err, c = config) {
+  // now: kullanıcı bir şey denedi (bağlan, bağlantı oluştur); kendiliğinden yeniden denenmez.
+  function explain(err, c = config, now = false) {
     const viewer = c?.mode === 'viewer';
     if (!(err instanceof ApiError)) return err?.message || 'Bilinmeyen bir hata oluştu.';
-    if (err.status === 0) return 'İnternet bağlantısı yok; bağlanınca eşitlenecek.';
-    if (err.rateLimited) return 'GitHub kısa süreliğine sınır koydu; biraz sonra yeniden denenecek.';
+    if (err.status === 0) return now ? 'İnternet bağlantısı yok; bağlanınca yeniden dene.' : 'İnternet bağlantısı yok; bağlanınca eşitlenecek.';
+    if (err.rateLimited) {
+      return now ? 'GitHub kısa süreliğine sınır koydu; biraz sonra yeniden dene.'
+        : 'GitHub kısa süreliğine sınır koydu; biraz sonra kaldığı yerden sürecek.';
+    }
     if (err.status === 401) {
       return viewer ? 'Bu izleme bağlantısı artık geçerli değil; yeni bağlantı iste.'
-        : 'Anahtar geçersiz, süresi dolmuş ya da silinmiş. İnternette saklama sayfasından yeni anahtar gir.';
+        : 'Anahtar geçersiz, süresi dolmuş ya da silinmiş. İnternette saklama sayfasında "Anahtarı yenile"ye yeni anahtar gir.';
     }
     if (err.status === 403) {
       return viewer ? 'Bu bağlantının listeyi görme izni yok.'
         : 'Anahtarın yazma izni yok. Anahtarı oluştururken "Contents" iznini "Read and write" seç.';
     }
     if (err.status === 404) {
-      return `${c?.repo || REPO_NAME} deposu bulunamadı ya da anahtar bu depoya erişemiyor.`;
+      return viewer ? 'Bu izleme bağlantısı artık geçerli değil; yeni bağlantı iste.'
+        : `${c?.repo || REPO_NAME} deposu bulunamadı ya da anahtar bu depoya erişemiyor.`;
     }
     return `GitHub hatası (${err.status}): ${err.message}`;
   }
@@ -260,10 +316,11 @@ const Cloud = (() => {
   }
 
   const isBlob = (v) => v instanceof Blob;
-  const IMAGE_TYPE = /^image\/[a-z0-9.+-]{1,40}$/i;
-  const isRef = (v) => Boolean(v) && typeof v === 'object' && SHA.test(v.sha) && IMAGE_TYPE.test(v.type);
+  // Yalnızca resim türleri; SVG gibi içinde betik taşıyabilen türler kabul edilmez.
   const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
-  const imagePath = (ref) => `${IMAGE_DIR}/${ref.sha}${EXT[ref.type.toLowerCase()] || ''}`;
+  const imageType = (type) => (Object.hasOwn(EXT, String(type).toLowerCase()) ? String(type).toLowerCase() : null);
+  const isRef = (v) => Boolean(v) && typeof v === 'object' && SHA.test(v.sha) && Boolean(imageType(v.type));
+  const imagePath = (ref) => `${IMAGE_DIR}/${ref.sha}${EXT[ref.type.toLowerCase()]}`;
 
   // Bu cihazdaki halin izi: görseller boyut ve türleriyle temsil edilir.
   // Son eşitlenen izle aynıysa plak bu cihazda değişmemiştir.
@@ -281,7 +338,7 @@ const Cloud = (() => {
     for (const [k, v] of Object.entries(record)) {
       if (COVERS.includes(k)) {
         if (isBlob(v)) {
-          const type = IMAGE_TYPE.test(v.type) ? v.type : 'image/jpeg';
+          const type = imageType(v.type) || 'image/jpeg';
           const ref = { sha: await gitSha(v), type };
           blobs.push({ ...ref, blob: v });
           out[k] = ref;
@@ -296,7 +353,7 @@ const Cloud = (() => {
   }
 
   const validRemote = (r) => Boolean(r) && typeof r === 'object' && !Array.isArray(r)
-    && typeof r.id === 'string' && r.id.length > 0 && r.id.length <= 200 && !r.id.startsWith('#')
+    && typeof r.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(r.id)
     && COVERS.every((k) => r[k] == null || isRef(r[k]));
 
   function parseData(text) {
@@ -386,7 +443,14 @@ const Cloud = (() => {
       removed ? `${removed} plak silindi` : '',
     ].filter(Boolean).join(', ');
 
-    const newTree = await github(c, 'git/trees', { method: 'POST', body: { base_tree: remote.tree, tree } });
+    let newTree;
+    try {
+      newTree = await github(c, 'git/trees', { method: 'POST', body: { base_tree: remote.tree, tree } });
+    } catch (err) {
+      // Yüklendiği sanılan bir görsel depoda yok (depo yeniden açılmış): yeniden yüklenir.
+      if (err.status === 422) uploaded.clear();
+      throw err;
+    }
     const commit = await github(c, 'git/commits', {
       method: 'POST', body: { message, tree: newTree.sha, parents: [remote.commit] },
     });
@@ -426,15 +490,21 @@ const Cloud = (() => {
     const viewer = c.mode === 'viewer';
     const repoKey = `${c.owner}/${c.repo}`.toLowerCase();
     let meta = await DB.syncGet(META);
-    if (!meta || meta.repo !== repoKey) {
-      // Başka bir depoya bağlanıldı: eski eşitleme bilgisi geçersiz.
+    const resetBase = async () => {
+      uploaded.clear();
       await DB.syncClear();
       meta = { id: META, repo: repoKey, commit: null, at: null };
       await DB.syncPut(meta);
+    };
+    if (!meta || meta.repo !== repoKey) {
+      // Başka bir depoya bağlanıldı: eski eşitleme bilgisi geçersiz. İzleyen cihazda
+      // önceki listenin plakları da silinir.
+      if (viewer) await DB.clearAll();
+      await resetBase();
     }
 
     const [locals, stored] = await Promise.all([DB.all(), DB.syncAll()]);
-    const entries = new Map(stored.filter((e) => e.id !== META).map((e) => [e.id, e]));
+    let entries = new Map(stored.filter((e) => e.id !== META).map((e) => [e.id, e]));
     const local = new Map(locals.map((r) => [r.id, r]));
     const fps = new Map(locals.map((r) => [r.id, fingerprint(r)]));
     const localChanged = locals.some((r) => entries.get(r.id)?.fp !== fps.get(r.id))
@@ -444,6 +514,13 @@ const Cloud = (() => {
     if (head === meta.commit && !localChanged) return finish(meta, head, 0);
 
     let remote = head ? await loadRemote(c, head) : emptyRemote();
+    if (!viewer && entries.size && !remote.files.has(DATA_FILE)) {
+      // İnternetteki liste yok (depo silinip yeniden açılmış ya da boşaltılmış): bu,
+      // plakların silindiği anlamına gelmez (uygulama listeyi hiç silmez). Bu
+      // cihazdaki plaklar yeni sayılıp yüklenir.
+      await resetBase();
+      entries = new Map();
+    }
     const skip = new Set(remote.extra.map((r) => r?.id).filter((id) => typeof id === 'string'));
 
     // Her plak için ne yapılacağı.
@@ -519,8 +596,14 @@ const Cloud = (() => {
     async function image(ref) {
       if (!images.has(ref.sha)) {
         images.set(ref.sha, (async () => {
+          // İzleyenler sahibin saatlik istek hakkını paylaşır; azalınca durup sonra sürer.
+          if (viewer && rate.remaining !== null && rate.remaining < 1500) {
+            const err = new ApiError(429, 'budget');
+            err.retryAt = rate.reset;
+            throw err;
+          }
           const res = await github(c, `git/blobs/${ref.sha}`, { raw: true, fresh: false });
-          return new Blob([await res.arrayBuffer()], { type: ref.type });
+          return new Blob([await res.arrayBuffer()], { type: imageType(ref.type) || 'image/jpeg' });
         })());
       }
       return images.get(ref.sha);
@@ -532,7 +615,7 @@ const Cloud = (() => {
       if (Date.now() - lastShown > 3000) { lastShown = Date.now(); remoteChanged(); }
     };
     if (total > 3) progress();
-    await pool(pulls, 4, async ({ id, R, rdata, lfp }) => {
+    await pool(pulls, 2, async ({ id, R, rdata, lfp }) => {
       const next = { ...R };
       for (const k of COVERS) if (k in R) next[k] = R[k] ? await image(R[k]) : null;
       const done = await DB.swap(id, (cur) => fingerprint(cur) === lfp, next, { id, fp: fingerprint(next), data: rdata });
@@ -573,6 +656,12 @@ const Cloud = (() => {
         await initRepo(c);
         head = await headCommit(c);
         remote = await loadRemote(c, head);
+        if (remote.files.has(DATA_FILE)) {
+          // Başka bir cihaz bu arada kaydetti: onun plakları alınarak yeniden planlanır.
+          const err = new Error('yeniden');
+          err.conflict = true;
+          throw err;
+        }
       }
       const present = new Set(remote.files.values());
       let sent = 0;
@@ -636,10 +725,11 @@ const Cloud = (() => {
   let running = null;
   let again = false;
   let started = false;
+  let blockedUntil = 0; // GitHub sınır koyduysa o zamana kadar kendiliğinden denenmez
   function schedule(delay) {
     if (!config || !started) return;
     clearTimeout(timer);
-    timer = setTimeout(run, delay);
+    timer = setTimeout(run, Math.max(delay, blockedUntil - Date.now()));
   }
 
   // Aynı cihazda birden fazla sekme açıksa eşitleme sırayla yapılır.
@@ -659,7 +749,8 @@ const Cloud = (() => {
 
   async function syncWithRetry() {
     const c = config;
-    if (!c) return;
+    // Sayfa başka veritabanına geçmek üzere yeniden yükleniyorsa eşitlenmez.
+    if (!c || !DB.useName(dbName())) return;
     lastRun = Date.now();
     setStatus({ state: 'busy', text: 'Eşitleniyor…' });
     for (let attempt = 0; ; attempt++) {
@@ -672,9 +763,21 @@ const Cloud = (() => {
         console.error(err);
         if (config !== c) return;
         const offline = err instanceof ApiError && err.status === 0;
-        setStatus({ state: offline ? 'offline' : 'error', text: explain(err, c), at: lastAt });
-        // Kullanıcının düzeltmesi gerekenler (anahtar, depo) kendiliğinden denenmez.
-        if (!offline && ![401, 404].includes(err.status)) schedule(err.rateLimited ? 15 * 60000 : 5 * 60000);
+        const revoked = [401, 404].includes(err.status);
+        // İzleme bağlantısı geri alındıysa indirilen liste bu cihazdan da kalkar.
+        if (revoked && c.mode === 'viewer') {
+          await DB.clearAll().catch(console.error);
+          remoteChanged();
+        }
+        setStatus({ state: offline ? 'offline' : 'error', text: explain(err, c), code: err.status || 0, at: lastAt });
+        if (err.rateLimited) {
+          blockedUntil = Math.max(err.retryAt || 0, Date.now() + 60000);
+          if (!err.retryAt) blockedUntil = Date.now() + 15 * 60000;
+          schedule(0);
+        } else if (!offline && !revoked) {
+          // Kullanıcının düzeltmesi gerekenler (anahtar, depo) kendiliğinden denenmez.
+          schedule(5 * 60000);
+        }
         return;
       }
     }
@@ -701,6 +804,32 @@ const Cloud = (() => {
 
   // ---------- Ayar ekranının işleri ----------
 
+  // Anahtar Plaklarim-veri dışında başka gizli bir depoyu da okuyabiliyorsa o deponun
+  // adı döner. Bağlantıyla paylaşılan anahtar yalnızca bu depoya erişmeli.
+  async function otherRepoReadable(c, token) {
+    let list;
+    try {
+      list = await github(c, '/user/repos?visibility=private&affiliation=owner&per_page=100', { token });
+    } catch {
+      return null; // anlaşılamadı; engellenmez
+    }
+    const self = `${c.owner}/${c.repo}`.toLowerCase();
+    const others = (Array.isArray(list) ? list : [])
+      .filter((r) => typeof r?.full_name === 'string' && r.full_name.toLowerCase() !== self).slice(0, 3);
+    for (const r of others) {
+      const path = r.full_name.split('/').map(encodeURIComponent).join('/');
+      try {
+        await github(c, `/repos/${path}/git/ref/heads/${encodeURIComponent(r.default_branch || 'main')}`, { token });
+        return r.full_name;
+      } catch (err) {
+        if (err.status === 409) return r.full_name; // boş depo ama erişebiliyor
+      }
+    }
+    return null;
+  }
+  const scopeError = (c, other) => new Error(`Bu anahtar başka bir gizli deponu da (${other}) açabiliyor. `
+    + `GitHub'da bu anahtarı sil; yenisini oluştururken "Only select repositories" altında yalnızca ${c.repo}'yi seç.`);
+
   // Yapıştırılan anahtarı ya da bağlantıyı kullanır. Sayfa yeniden yüklenecekse
   // 'reload' döner.
   async function connect(text) {
@@ -714,7 +843,9 @@ const Cloud = (() => {
         return 'reload';
       }
       run();
-      return notice;
+      const n = notice;
+      notice = '';
+      return n;
     }
     const token = input.replace(/^(Bearer|token)\s+/i, '');
     if (!TOKEN.test(token)) {
@@ -725,7 +856,7 @@ const Cloud = (() => {
     try {
       user = await github(probe, '/user');
     } catch (err) {
-      throw new Error(err.status === 401 ? 'Anahtar geçersiz ya da süresi dolmuş.' : explain(err, probe));
+      throw new Error(err.status === 401 ? 'Anahtar geçersiz ya da süresi dolmuş.' : explain(err, probe, true));
     }
     let repo;
     try {
@@ -734,7 +865,7 @@ const Cloud = (() => {
       if (err.status === 404) {
         throw new Error(`${REPO_NAME} deposu bulunamadı. Depoyu oluşturduğundan ve anahtarı oluştururken "Only select repositories" altında bu depoyu seçtiğinden emin ol.`);
       }
-      throw new Error(explain(err, probe));
+      throw new Error(explain(err, probe, true));
     }
     if (!repo.private) {
       throw new Error(`${REPO_NAME} deposu herkese açık; plakların herkese görünür olur. GitHub'da depo ayarlarından "Private" yap, sonra yeniden dene.`);
@@ -745,8 +876,11 @@ const Cloud = (() => {
       if (await headCommit(c)) await github(c, 'git/blobs', { method: 'POST', body: { content: 'plaklarim', encoding: 'utf-8' } });
       else await initRepo(c);
     } catch (err) {
-      throw new Error(explain(err, c));
+      throw new Error(explain(err, c, true));
     }
+    // Cihaz bağlantısıyla taşınacak anahtar başka depoları açmamalı.
+    const other = await otherRepoReadable(c, token);
+    if (other) throw scopeError(c, other);
     const viewerBefore = config?.mode === 'viewer';
     const keepView = config?.mode === 'owner' && sameRepo(config, c) && config.viewToken;
     saveConfig({ ...c, ...(keepView && { viewToken: config.viewToken }) });
@@ -768,21 +902,24 @@ const Cloud = (() => {
     if (token === c.token) throw new Error('Bu, bu cihazın yazma anahtarı. İzleme için yalnızca okuma izni olan ayrı bir anahtar oluştur.');
     try {
       await github(c, '', { token });
+      await github(c, `git/ref/heads/${branchPath(c)}`, { token }); // listeyi okuyabiliyor mu
     } catch (err) {
       if (err.status === 401) throw new Error('Anahtar geçersiz ya da süresi dolmuş.');
       if (err.status === 404) throw new Error(`Bu anahtar ${c.repo} deposunu göremiyor; anahtarı oluştururken bu depoyu seç.`);
-      throw new Error(explain(err, c));
+      if (err.status === 403 && !err.rateLimited) throw new Error('Bu anahtar listeyi okuyamıyor; "Contents" iznini "Read-only" seç.');
+      throw new Error(explain(err, c, true));
     }
-    let writable = true;
+    // Yazma denemesi: yalnızca GitHub'ın açık "izin yok" cevabı salt okunur sayılır;
+    // sınır ya da geçici hata gibi başka her cevapta bağlantı oluşturulmaz.
     try {
       await github(c, 'git/blobs', { method: 'POST', token, body: { content: 'plaklarim', encoding: 'utf-8' } });
-    } catch (err) {
-      if (err.status === 0 || err.rateLimited || err.status >= 500) throw new Error(explain(err, c));
-      writable = false;
-    }
-    if (writable) {
       throw new Error('Bu anahtar plaklarını değiştirebiliyor. İzleme için "Contents" izni "Read-only" olan ayrı bir anahtar oluştur.');
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      if (!(err.status === 403 && !err.rateLimited && /not accessible/i.test(err.message))) throw new Error(explain(err, c, true));
     }
+    const other = await otherRepoReadable(c, token);
+    if (other) throw scopeError(c, other);
     saveConfig({ ...c, viewToken: token });
     return linkFor('izle', c, token);
   }
@@ -801,8 +938,10 @@ const Cloud = (() => {
   }
 
   const enc = encodeURIComponent;
+  // GitHub'da anahtar adları tekrarlanamaz; ada tarih eklenir.
   const tokenUrl = (name, description, access) => 'https://github.com/settings/personal-access-tokens/new'
-    + `?name=${enc(name)}&description=${enc(description)}&expires_in=none&contents=${access}`;
+    + `?name=${enc(`${name} ${new Date().toLocaleString('tr')}`)}&description=${enc(description)}`
+    + `&expires_in=none&contents=${access}`;
 
   return {
     REPO_NAME,
@@ -826,8 +965,8 @@ const Cloud = (() => {
     setConfirm: (fn) => { confirmDelete = fn; },
     links: {
       newRepo: `https://github.com/new?name=${REPO_NAME}&visibility=private&description=${enc('Plaklarım uygulamasının verileri')}`,
-      writeToken: tokenUrl('Plaklarım', 'Plaklarım uygulaması: plakları kaydetme', 'write'),
-      readToken: tokenUrl('Plaklarım izleme', 'Plaklarım uygulaması: listeyi yalnızca görme', 'read'),
+      get writeToken() { return tokenUrl('Plaklarım', 'Plaklarım uygulaması: plakları kaydetme', 'write'); },
+      get readToken() { return tokenUrl('Plaklarım izleme', 'Plaklarım uygulaması: listeyi yalnızca görme', 'read'); },
       tokens: 'https://github.com/settings/personal-access-tokens',
     },
     // Testler için.

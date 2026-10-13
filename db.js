@@ -35,6 +35,11 @@ const DB = (() => {
           resolve(req.result);
         };
         req.onerror = () => reject(req.error);
+        // Eski sürüm başka bir pencerede açıksa yeni sürüm onun kapanmasını bekler.
+        req.onblocked = () => {
+          const view = document.getElementById('view');
+          if (view) view.innerHTML = '<p class="empty">Plaklarım başka bir pencerede de açık. Onu kapatıp bu sayfayı yenile.</p>';
+        };
       });
     }
     return dbPromise;
