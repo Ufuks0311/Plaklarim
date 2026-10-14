@@ -524,45 +524,58 @@ function readDiscs(raw = false) {
 const isEmptyRow = (row) => [...row.querySelectorAll('input')].every((input) => !input.value.trim());
 const SIMPLE_NO = /^([A-Z]\s*)?\d+$/i; // 6, A6
 
-// Yüzlerdeki numaraların en küçüğü (6, A6 → 6); düz numara yoksa null.
+// Her yüzün ilk şarkısının görünen numarası (6, A6 → 6; otomatik numara da sayılır);
+// o özel bir numaraysa yüzdeki düz numaraların en küçüğü, o da yoksa null.
 const numberOf = (no) => parseInt(no.replace(/^[A-Z]\s*/i, ''), 10);
 const sideNumbers = (fs) => [...fs.querySelectorAll('.t-no')].map((input) => input.value.trim()).filter(Boolean);
 function firstNumbers(container) {
   return new Map([...container.querySelectorAll('.tracks')].map((fs) => {
     const nos = sideNumbers(fs).filter((no) => SIMPLE_NO.test(no));
-    return [fs, nos.length ? Math.min(...nos.map(numberOf)) : null];
+    const row = [...fs.querySelectorAll('.track-row')].find((other) => !isEmptyRow(other));
+    const shown = row && (row.querySelector('.t-no').value.trim() || row.querySelector('.t-no').placeholder);
+    return [fs, shown && SIMPLE_NO.test(shown) ? numberOf(shown) : nos.length ? Math.min(...nos.map(numberOf)) : null];
   }));
 }
 
 // Şarkı taşındıktan sonra numaralar. Hepsi düzse (1, 2… ya da A1, A2…) yeni
 // sıraya göre yeniden verilir, harfli numaralar bulundukları yüzün harfini alır.
 // Taşımadan önce 1'den başlayan yüz yine 1'den başlar, önceki yüzden devam
-// eden yüz (A: 1–5, B: 6–10) yine devam eder; ilk kez numara alan yüz plaktaki
-// diğer yüzlere uyar. "A1a", "2-3" gibi özel numaralar varsa hiçbirine
-// dokunulmaz; numarası boş yüzler boş kalır. Otomatik numarayla aynı olan
-// numaralar boş gösterilir (yer değişince kendiliğinden kayar).
+// eden yüz (A: 1–5, B: 6–10, otomatik numaralı A1–A4'ten sonra B5–B8) yine
+// devam eder; ilk kez numara alan yüz plaktaki diğer yüzlere uyar. "A1a", "2-3"
+// gibi özel numaralı yüze dokunulmaz, ondan sonraki yüz kendi başlangıcını korur;
+// numarası boş yüzler boş kalır. Otomatik numarayla aynı olan numaralar boş
+// gösterilir (yer değişince kendiliğinden kayar).
 // before: taşımadan önceki firstNumbers().
 function renumberTracks(container, before) {
   const sides = [...container.querySelectorAll('.tracks')];
   const all = sides.flatMap(sideNumbers);
-  if (all.every((no) => SIMPLE_NO.test(no))) {
-    const lettered = (nos) => nos.some((no) => /^[A-Z]/i.test(no));
-    // İlk yüzden sonra 1'den büyük başlayan bir yüz varsa numaralar yüzden yüze sürüyordur.
-    const continuous = [...before.values()].filter((first) => first != null).slice(1).some((first) => first > 1);
-    let next = null;
-    sides.forEach((fs) => {
-      const nos = sideNumbers(fs);
-      if (!nos.length) return;
-      const first = before.get(fs);
-      const prefix = lettered(nos) || (first == null && lettered(all)) ? fs.dataset.side : '';
-      const continues = next != null && (first == null ? continuous : first > 1);
-      let n = continues ? next : 1;
-      [...fs.querySelectorAll('.track-row')].filter((row) => !isEmptyRow(row)).forEach((row) => {
-        row.querySelector('.t-no').value = `${prefix}${n++}`;
-      });
-      next = n;
+  const lettered = (nos) => nos.some((no) => /^[A-Z]/i.test(no));
+  // İlk yüzden sonra 1'den büyük başlayan bir yüz varsa numaralar yüzden yüze sürüyordur.
+  const continuous = [...before.values()].filter((first) => first != null).slice(1).some((first) => first > 1);
+  let next = null;
+  let afterCustom = false;
+  sides.forEach((fs) => {
+    const nos = sideNumbers(fs);
+    const filledRows = [...fs.querySelectorAll('.track-row')].filter((row) => !isEmptyRow(row)).length;
+    if (!nos.length) {
+      if (filledRows) next = filledRows + 1; // otomatik numaralı yüz 1'den sayar
+      return;
+    }
+    if (!nos.every((no) => SIMPLE_NO.test(no))) {
+      next = null;
+      afterCustom = true;
+      return;
+    }
+    const first = before.get(fs);
+    const prefix = lettered(nos) || (first == null && lettered(all)) ? fs.dataset.side : '';
+    const continues = next != null && (first == null ? continuous : first > 1);
+    let n = continues ? next : (afterCustom && first > 1 ? first : 1);
+    afterCustom = false;
+    [...fs.querySelectorAll('.track-row')].filter((row) => !isEmptyRow(row)).forEach((row) => {
+      row.querySelector('.t-no').value = `${prefix}${n++}`;
     });
-  }
+    next = n;
+  });
   sides.forEach((fs) => {
     renumberPlaceholders(fs);
     fs.querySelectorAll('.t-no').forEach((input) => {
@@ -721,9 +734,10 @@ async function renderForm(id) {
     rows.addEventListener('click', (e) => {
       const btn = e.target.closest('.remove-track');
       if (!btn) return;
+      const numbersBefore = firstNumbers(discsEl);
       btn.closest('.track-row').remove();
       if (!rows.children.length) rows.insertAdjacentHTML('beforeend', trackRow(undefined, fs.dataset.side, 0));
-      renumberPlaceholders(fs);
+      renumberTracks(discsEl, numbersBefore);
     });
     // Şarkı adında Enter formu göndermesin, alttaki alana geçsin.
     rows.addEventListener('keydown', (e) => {
@@ -816,14 +830,22 @@ async function renderForm(id) {
     // Aynı numaralı başka şarkı: önce kendi yüzünde, sonra (harfliyse ya da numaralar
     // sürüyorsa) plağın diğer yüzlerinde.
     const matches = rows.filter((other) => other !== row && !isEmptyRow(other) && sameNumber(numberOfRow(other)));
-    const target = matches.find((other) => other.closest('.tracks') === from) || (letter || continuous ? matches[0] : undefined);
+    // Numara dizisi: 1'den (ya da otomatik numarayla) başlayan yüz ve onu sürdüren yüzler.
+    const sidesList = [...discsEl.querySelectorAll('.tracks')];
+    const runOf = (fs) => {
+      let i = sidesList.indexOf(fs);
+      while (i > 0 && (numbersBefore.get(sidesList[i]) ?? 2) > 1) i--;
+      return sidesList[i];
+    };
+    const target = matches.find((other) => other.closest('.tracks') === from)
+      || (letter ? matches[0] : continuous ? matches.find((other) => runOf(other.closest('.tracks')) === runOf(from)) : undefined);
     let to;
     let before;
     if (target) {
       to = target.closest('.tracks');
       // Aşağı taşınan şarkı, kendisi çıkınca hedefin numarası bir azalıyorsa (aynı
       // yüz ya da süren numaralar) hedefin altına, değilse üstüne girer.
-      const after = rows.indexOf(target) > rows.indexOf(row) && (to === from || continuous);
+      const after = rows.indexOf(target) > rows.indexOf(row) && (to === from || (continuous && runOf(to) === runOf(from)));
       before = after ? target.nextElementSibling : target;
     } else if (letter && n >= 1) {
       const index = letter.charCodeAt(0) - 65;
