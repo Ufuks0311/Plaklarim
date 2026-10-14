@@ -64,12 +64,41 @@ plak baskısı varsa onun yılı ve plak şirketi tercih edilir.
 ## Veriler nerede duruyor?
 
 Kayıtlar ve görseller, uygulamayı açtığın tarayıcının kendi veritabanında
-(IndexedDB) saklanır. Sunucu, hesap ya da ücret yoktur; veriler yalnızca
-senin telefonunda durur.
+(IndexedDB) saklanır; internet olmadan da açılır.
 
-Bu yüzden ara sıra sağ üstteki **⋮ → Yedeği indir** ile yedek al. Yedek dosyası
-tüm plakları ve kapak görsellerini içerir; telefon değiştirdiğinde ya da
-tarayıcı verisini sildiğinde **⋮ → Yedekten geri yükle** ile geri alırsın.
+### İnternette saklama (isteğe bağlı)
+
+**⋮ → İnternette saklama** ile plaklar senin GitHub hesabındaki gizli bir depoda
+(`Plaklarim-veri`) da saklanır. Böylece bağladığın her cihazda aynı liste açılır;
+bir cihazda eklenen, değiştirilen ya da silinen plak diğerlerine kendiliğinden
+geçer. Sunucu ya da ücret yoktur; uygulama GitHub'a doğrudan bağlanır.
+
+1. Sayfadaki **GitHub'da depo oluştur** düğmesi adı ve gizliliği hazır gelen depo
+   sayfasını açar; **Create repository**'ye bas.
+2. **Anahtar oluştur** düğmesi izinleri hazır gelen anahtar sayfasını açar;
+   **Only select repositories** altında `Plaklarim-veri`'yi seçip **Generate token**'a bas.
+3. Anahtarı uygulamaya yapıştır. Anahtar yalnızca o cihazda saklanır.
+
+Diğer cihazlarında **Başka bir cihazını bağla** bağlantısını aç (ana ekrana eklenmiş
+uygulamada açılmazsa bağlantıyı kopyalayıp oradaki İnternette saklama sayfasına
+yapıştır).
+
+**İzin verdiklerin görsün:** yalnızca okuma izni olan ikinci bir anahtarla bir izleme
+bağlantısı oluşturulur. Bağlantıyı açanlar listeyi görür ama değiştiremez; kendi
+plakları varsa onlara karışmaz. Okuma anahtarını GitHub'da silince bütün izleme
+bağlantıları çalışmaz olur.
+
+Depoda `plaklar.json` (her satırda bir plak) ve `kapaklar/` klasörü durur. Her
+değişiklik GitHub'da geçmişe yazılır; yanlışlıkla silinen bir plak oradan geri
+alınabilir. İki cihazda aynı plak değiştirilmişse son değiştirilen kalır; birinde
+silinip öbüründe değiştirilmişse değiştirilen kalır.
+
+### Yedek
+
+İnternette saklamayı kullanmıyorsan ara sıra sağ üstteki **⋮ → Yedeği indir** ile
+yedek al. Yedek dosyası tüm plakları ve kapak görsellerini içerir; telefon
+değiştirdiğinde ya da tarayıcı verisini sildiğinde **⋮ → Yedekten geri yükle** ile
+geri alırsın.
 
 Kareye oturtulan kapaklar kaydedilirken en fazla 1600×1600 piksele küçültülür,
 böylece yüzlerce plak bile az yer kaplar.

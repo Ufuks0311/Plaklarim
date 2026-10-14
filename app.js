@@ -150,8 +150,9 @@ function normalizeForStorage(record) {
 }
 
 // Daha önce kaydedilmiş plakları bu biçime getirir; bu sürümle düzeltilmiş ya da
-// değişmeyen plaklara dokunmaz.
+// değişmeyen plaklara dokunmaz. İzlenen listeye (başkasının plakları) dokunulmaz.
 async function normalizeStoredRecords() {
+  if (Cloud.viewer()) return;
   try {
     for (const record of await DB.all()) {
       if ((record.casingVersion || 0) >= CASING_VERSION) continue;
@@ -176,36 +177,52 @@ function nextRecordNo(records) {
 
 // ---------- Yönlendirme ----------
 
-async function route() {
+const currentPage = () => location.hash.replace(/^#/, '').split('/')[1] || '';
+
+// keepScroll: internetten gelen değişiklikle yenilenirken sayfa yerinde kalır.
+async function route({ keepScroll = false } = {}) {
+  const y = window.scrollY;
   releaseUrls();
   closeMenu();
   const [, page, id] = location.hash.replace(/^#/, '').split('/');
+  const editing = page === 'yeni' || page === 'duzenle';
   try {
     if (page === 'plak' && id) await renderDetail(id);
+    else if (editing && Cloud.viewer()) await renderList(); // izleyen değiştiremez
     else if (page === 'yeni') await renderForm();
     else if (page === 'duzenle' && id) await renderForm(id);
+    else if (page === 'bulut') renderCloud();
     else await renderList();
   } catch (err) {
     console.error(err);
     view.innerHTML = `<p class="empty">Bir hata oluştu: ${esc(err.message)}</p>`;
   }
-  window.scrollTo(0, 0);
+  window.scrollTo(0, keepScroll ? y : 0);
+  const notice = Cloud.takeNotice();
+  if (notice) toast(notice);
 }
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => route());
 
 // ---------- Liste ----------
 
 let lastQuery = '';
+// Liste ekranı açıkken internetten gelen değişiklikleri, arama kutusuna dokunmadan
+// listeye yansıtır.
+let refreshList = null;
 
 async function renderList() {
-  const records = (await DB.all()).sort(byRecordOrder);
+  refreshList = null;
+  let records = (await DB.all()).sort(byRecordOrder);
+  const viewer = Cloud.viewer();
+  const cloud = Cloud.info();
   view.innerHTML = `
+    ${viewer ? `<p class="viewing"><a href="#/bulut">${esc(cloud.owner)} kullanıcısının plakları · yalnızca görüntüleme</a></p>` : ''}
     <div class="search">
       <input type="search" id="q" placeholder="Sanatçı, albüm veya şarkı ara" value="${esc(lastQuery)}" autocomplete="off">
     </div>
     <p class="count" id="count"></p>
     <ul class="grid" id="grid"></ul>
-    <a href="#/yeni" class="fab" aria-label="Yeni plak ekle">+</a>
+    ${viewer ? '' : '<a href="#/yeni" class="fab" aria-label="Yeni plak ekle">+</a>'}
   `;
 
   const grid = document.getElementById('grid');
@@ -214,7 +231,9 @@ async function renderList() {
 
   if (!records.length) {
     count.textContent = '';
-    grid.outerHTML = `<div class="empty">
+    grid.outerHTML = viewer
+      ? `<div class="empty"><p>${esc({ ok: 'Listede henüz plak yok.', error: Cloud.status().text }[Cloud.status().state] || 'Plaklar yükleniyor…')}</p></div>`
+      : `<div class="empty">
       <p>Henüz plak eklemedin.</p>
       <p><a href="#/yeni" class="btn primary">İlk plağı ekle</a></p>
     </div>`;
@@ -222,7 +241,7 @@ async function renderList() {
     return;
   }
 
-  const thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
+  let thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
 
   function draw() {
     const term = q.value.trim().toLocaleLowerCase('tr');
@@ -250,6 +269,17 @@ async function renderList() {
 
   q.addEventListener('input', draw);
   draw();
+
+  refreshList = async () => {
+    const fresh = (await DB.all()).sort(byRecordOrder);
+    if (!grid.isConnected) return;
+    if (!fresh.length) { route({ keepScroll: true }); return; }
+    const old = thumbs;
+    records = fresh;
+    thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
+    draw();
+    old.forEach((url) => url && URL.revokeObjectURL(url));
+  };
 }
 
 // ---------- Detay ----------
@@ -279,9 +309,11 @@ async function renderDetail(id) {
     .filter(([, blob]) => blob)
     .map(([label, blob]) => {
       const url = blobUrl(blob);
+      // Büyütmek için yeni sekmede yalnızca düz resimler açılır (SVG betik taşıyabilir).
+      const img = `<img src="${url}" alt="${label}">`;
       return `
       <figure>
-        <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${label}"></a>
+        ${/^image\/(jpeg|png|webp|gif)$/i.test(blob.type) ? `<a href="${url}" target="_blank" rel="noopener">${img}</a>` : img}
         <figcaption>${label}</figcaption>
       </figure>`;
     }).join('');
@@ -309,13 +341,13 @@ async function renderDetail(id) {
         </section>`;
       }).join('')}
       ${r.notes ? `<section class="notes"><h3>Notlar</h3><p>${esc(r.notes)}</p></section>` : ''}
-      <div class="actions">
+      ${Cloud.viewer() ? '' : `<div class="actions">
         <a href="#/duzenle/${esc(r.id)}" class="btn primary">Düzenle</a>
         <button class="btn danger" id="deleteBtn">Sil</button>
-      </div>
+      </div>`}
     </article>`;
 
-  document.getElementById('deleteBtn').addEventListener('click', async () => {
+  document.getElementById('deleteBtn')?.addEventListener('click', async () => {
     if (!confirm(`"${r.album}" silinsin mi? Bu işlem geri alınamaz.`)) return;
     await DB.remove(r.id);
     toast('Plak silindi');
@@ -909,6 +941,20 @@ async function renderForm(id) {
       casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
     if (!record.namesBeforeCasing && nameText(typed) !== nameText(record)) record.namesBeforeCasing = typed;
+    // Form açıkken plak başka bir cihazda değiştirildiyse (eşitlemeyle geldi), burada
+    // değiştirilmeyen alanlar ve kapaklar o yeni halinden alınır.
+    const current = existing && await DB.get(existing.id);
+    if (current && current.updatedAt !== existing.updatedAt) {
+      const same = (a, b) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
+      ['no', 'artist', 'album', 'year', 'genre', 'label', 'notes'].forEach((k) => {
+        if (same(record[k], existing[k])) record[k] = current[k];
+      });
+      if (same(record.discs, discsOf(existing))) record.discs = discsOf(current);
+      ['frontCover', 'backCover'].forEach((k) => {
+        if (images[k] === (existing[k] || null)) record[k] = current[k] || null;
+      });
+      if (current.namesBeforeCasing && !existing.namesBeforeCasing) record.namesBeforeCasing = current.namesBeforeCasing;
+    }
     await DB.put(record);
     toast('Kaydedildi');
     location.hash = `#/plak/${record.id}`;
@@ -918,7 +964,18 @@ async function renderForm(id) {
 // ---------- Menü: yedekleme ----------
 
 const menu = document.getElementById('menu');
-function closeMenu() { menu.hidden = true; }
+function closeMenu() {
+  if (menu.hidden) return;
+  menu.hidden = true;
+  if (refreshPending) setTimeout(refreshFromRemote, 0);
+}
+// İzlenen listede plak eklenmez, kapak okunmaz, yedek geri yüklenmez.
+if (Cloud.viewer()) {
+  menu.querySelector('[data-action=reader]').hidden = true;
+  document.getElementById('importItem').hidden = true;
+  menu.querySelector('[data-action=cloud]').textContent = 'İzleme';
+}
+menu.querySelector('[data-action=cloud]').addEventListener('click', closeMenu);
 document.getElementById('menuBtn').addEventListener('click', (e) => {
   e.stopPropagation();
   menu.hidden = !menu.hidden;
@@ -996,6 +1053,248 @@ document.getElementById('importInput').addEventListener('change', async (e) => {
   }
 });
 
+// ---------- İnternette saklama ----------
+
+function timeText(iso) {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString('tr', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString('tr', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+}
+function cloudStatusText(st = Cloud.status()) {
+  if (st.state === 'busy') return st.text || 'Eşitleniyor…';
+  if (st.state === 'error' || st.state === 'offline') return st.text;
+  return st.at ? `Son eşitleme: ${timeText(st.at)}` : '';
+}
+
+// Bağlantı telefonun paylaş menüsüyle gönderilir; yoksa kopyalanır.
+async function shareLink(url, title) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, url });
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Bağlantı kopyalandı');
+  } catch {
+    prompt('Bağlantıyı kopyala:', url);
+  }
+}
+
+const TOKEN_INPUT = 'placeholder="github_pat_…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"';
+
+function renderCloud() {
+  const info = Cloud.info();
+  const links = Cloud.links;
+  const ext = 'target="_blank" rel="noopener"';
+  const repo = esc(info?.repo || Cloud.REPO_NAME);
+  let body;
+  if (!info) {
+    body = `
+      <p>Plakların GitHub hesabındaki gizli bir depoda saklanır; bağladığın her cihazda aynı liste
+        açılır ve değişiklikler kendiliğinden eşitlenir. GitHub ücretsizdir. Bir kere kurulur:</p>
+      <ol class="steps">
+        <li><strong>Gizli depo oluştur.</strong>
+          <p class="hint">Açılan sayfada adı <b>${repo}</b>, görünürlüğü <b>Private</b> gelir; en alttaki
+            <b>Create repository</b>'ye bas. GitHub hesabın yoksa önce ücretsiz hesap aç.</p>
+          <a class="btn small" href="${links.newRepo}" ${ext}>GitHub'da depo oluştur</a></li>
+        <li><strong>Anahtar oluştur.</strong>
+          <p class="hint"><b>Repository access</b> bölümünde <b>Only select repositories</b>'i seçip
+            <b>${repo}</b>'yi işaretle (izinler hazır gelir), en alttaki <b>Generate token</b>'a bas
+            ve çıkan anahtarı kopyala.</p>
+          <a class="btn small" href="${links.writeToken}" ${ext}>Anahtar oluştur</a></li>
+        <li><strong>Anahtarı buraya yapıştır.</strong>
+          <form class="cloud-form" id="connectForm">
+            <input id="connectInput" ${TOKEN_INPUT} aria-label="Anahtar ya da bağlantı">
+            <button class="btn primary">Bağlan</button>
+          </form>
+          <p class="error" id="connectError" hidden></p>
+          <p class="hint">Anahtar yalnızca bu cihazda saklanır. Diğer cihazlarında anahtar yerine, bağlı
+            cihazdan paylaştığın bağlantıyı açman ya da buraya yapıştırman yeterli. Birinin
+            gönderdiği izleme bağlantısını da buraya yapıştırabilirsin.</p></li>
+      </ol>`;
+  } else if (info.mode === 'viewer') {
+    body = `
+      <p>Bu cihazda <b>${esc(info.owner)}</b> kullanıcısının plak listesini izliyorsun. Listeyi
+        görebilirsin ama değiştiremezsin; her açılışta güncellenir.</p>
+      <p class="hint">Uygulamayı ana ekrana eklediysen orada liste boş görünür; aldığın bağlantıyı
+        oradaki ⋮ → İnternette saklama sayfasına yapıştır.</p>
+      <p class="cloud-status" id="cloudStatus"></p>
+      <div class="actions">
+        <button class="btn" id="syncNow">Şimdi yenile</button>
+        <button class="btn danger" id="stopViewing">İzlemeyi bırak</button>
+      </div>
+      <section>
+        <h2>Yeni bağlantı aldıysan</h2>
+        <form class="cloud-form" id="connectForm">
+          <input id="connectInput" placeholder="https://…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="İzleme bağlantısı">
+          <button class="btn primary">Aç</button>
+        </form>
+        <p class="error" id="connectError" hidden></p>
+      </section>`;
+  } else {
+    body = `
+      <p>Plakların <b>${esc(info.owner)}/${repo}</b> gizli deposunda saklanıyor; bu cihazda yaptığın
+        değişiklikler kendiliğinden eşitlenir.</p>
+      <p class="cloud-status" id="cloudStatus"></p>
+      <button class="btn" id="syncNow">Şimdi eşitle</button>
+      <details class="renew"${[401, 403, 404].includes(Cloud.status().code) ? ' open' : ''}>
+        <summary>Anahtarı yenile</summary>
+        <p class="hint">Anahtar silindiyse ya da çalışmıyorsa <a href="${links.writeToken}" ${ext}>yeni anahtar oluştur</a>
+          (<b>Only select repositories</b> → <b>${repo}</b>) ve buraya yapıştır.</p>
+        <form class="cloud-form" id="connectForm">
+          <input id="connectInput" ${TOKEN_INPUT} aria-label="Yeni anahtar">
+          <button class="btn primary">Kaydet</button>
+        </form>
+        <p class="error" id="connectError" hidden></p>
+      </details>
+
+      <section>
+        <h2>Başka bir cihazını bağla</h2>
+        <p class="hint">Bu bağlantıyı diğer telefonunda ya da bilgisayarında aç. Ana ekrana eklenmiş
+          uygulamada açılmazsa bağlantıyı kopyalayıp oradaki <b>İnternette saklama</b> sayfasına yapıştır.
+          Bu bağlantıyla plakların değiştirilebilir; kimseyle paylaşma.</p>
+        <button class="btn" id="shareDevice">Bağlantıyı paylaş</button>
+      </section>
+
+      <section>
+        <h2>İzin verdiklerin görsün</h2>
+        <p class="hint">İzleme bağlantısını açanlar listeni görür ama değiştiremez. Bunun için yalnızca
+          okuma izni olan ayrı bir anahtar gerekir.</p>
+        ${info.hasViewLink ? '<p><button class="btn primary" id="shareView">İzleme bağlantısını paylaş</button></p>' : ''}
+        <ol class="steps">
+          <li><a class="btn small" href="${links.readToken}" ${ext}>Okuma anahtarı oluştur</a>
+            <p class="hint"><b>Only select repositories</b> altında <b>${repo}</b>'yi seç, en alttaki
+              <b>Generate token</b>'a bas ve anahtarı kopyala.</p></li>
+          <li><form class="cloud-form" id="viewForm">
+              <input id="viewInput" ${TOKEN_INPUT} aria-label="Okuma anahtarı">
+              <button class="btn">${info.hasViewLink ? 'Yeni bağlantı' : 'Bağlantı oluştur'}</button>
+            </form>
+            <p class="error" id="viewError" hidden></p></li>
+        </ol>
+        <p class="hint">Kimse görmesin istersen GitHub'daki <a href="${links.tokens}" ${ext}>anahtarlar</a>
+          sayfasından okuma anahtarını sil; o anahtarla verilen bütün izleme bağlantıları çalışmaz olur ve
+          liste izleyenlerin cihazından, uygulamayı bir sonraki açışlarında silinir.</p>
+      </section>
+
+      <section>
+        <button class="btn danger" id="disconnect">Bu cihazın bağlantısını kes</button>
+        <p class="hint">Plaklar bu cihazda kalır; internetteki kopyaya dokunulmaz.</p>
+      </section>`;
+  }
+  view.innerHTML = `
+    <article class="cloud-page">
+      <a href="#/" class="back">‹ Tüm plaklar</a>
+      <h1>${info?.mode === 'viewer' ? 'İzleme' : 'İnternette saklama'}</h1>
+      ${body}
+    </article>`;
+  showCloudStatus();
+
+  // Anahtar ya da bağlantı gönderen formlar.
+  function wireForm(formId, errorId, action) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button');
+      const error = document.getElementById(errorId);
+      error.hidden = true;
+      btn.disabled = true;
+      try {
+        await action(form.querySelector('input').value);
+      } catch (err) {
+        console.error(err);
+        if (!error.isConnected) return;
+        error.textContent = err.message;
+        error.hidden = false;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+  wireForm('connectForm', 'connectError', async (text) => {
+    const result = await Cloud.connect(text);
+    if (result === 'reload') {
+      location.reload();
+      return;
+    }
+    toast(result);
+    if (currentPage() === 'bulut') renderCloud();
+  });
+  wireForm('viewForm', 'viewError', async (text) => {
+    await Cloud.makeViewLink(text);
+    toast('İzleme bağlantısı hazır; paylaşabilirsin.');
+    if (currentPage() === 'bulut') renderCloud();
+  });
+
+  // Okuma anahtarı GitHub'da silindiyse paylaşma düğmesi kaldırılır.
+  if (info?.hasViewLink) {
+    Cloud.checkViewLink().then((ok) => {
+      if (!ok && currentPage() === 'bulut') renderCloud();
+    });
+  }
+
+  document.getElementById('syncNow')?.addEventListener('click', () => Cloud.syncNow());
+  document.getElementById('shareDevice')?.addEventListener('click', () => shareLink(Cloud.deviceLink(), 'Plaklarım: cihaz bağlantısı'));
+  document.getElementById('shareView')?.addEventListener('click', () => shareLink(Cloud.viewLink(), 'Plaklarım'));
+  document.getElementById('disconnect')?.addEventListener('click', () => {
+    if (!confirm('Bu cihazın bağlantısı kesilsin mi? Plaklar bu cihazda kalır ama artık eşitlenmez.')) return;
+    Cloud.disconnect();
+    renderCloud();
+  });
+  document.getElementById('stopViewing')?.addEventListener('click', async () => {
+    if (!confirm('İzlemeyi bırakınca indirilen liste bu cihazdan silinir. Bırakılsın mı?')) return;
+    await Cloud.stopViewing();
+    history.replaceState(null, '', `${location.pathname}${location.search}#/`);
+    location.reload();
+  });
+}
+
+// Üst çubuktaki bulut simgesi ve uzun işlemlerde altındaki bilgi satırı.
+const cloudBtn = document.getElementById('cloudBtn');
+const cloudLine = document.getElementById('cloudLine');
+function showCloudStatus(st = Cloud.status()) {
+  const text = cloudStatusText(st);
+  cloudBtn.hidden = st.state === 'off';
+  cloudBtn.dataset.state = st.state;
+  cloudBtn.title = text || 'İnternette saklama';
+  const line = st.state === 'error' || st.progress ? text : '';
+  cloudLine.textContent = line;
+  cloudLine.hidden = !line || currentPage() === 'bulut';
+  cloudLine.classList.toggle('error', st.state === 'error');
+  const el = document.getElementById('cloudStatus');
+  if (el) {
+    el.textContent = text;
+    el.classList.toggle('error', st.state === 'error');
+  }
+  // Anahtar çalışmıyorsa yenileme alanı kendiliğinden açılır.
+  const renew = view.querySelector('details.renew');
+  if (renew && st.state === 'error' && [401, 403, 404].includes(st.code)) renew.open = true;
+}
+// İnternetten gelen değişiklikler ekrana yansır. Liste yerinde yenilenir (arama
+// sürerken de); plak sayfası menü kapanınca yenilenir; düzenleme formuna
+// dokunulmaz (kaydederken başka cihazdaki değişiklikler korunur).
+let refreshPending = false;
+function refreshFromRemote() {
+  const page = currentPage();
+  if (page === 'yeni' || page === 'duzenle' || page === 'bulut') return;
+  if (page === '' && refreshList) { refreshList(); return; }
+  if (!menu.hidden) { refreshPending = true; return; }
+  refreshPending = false;
+  route({ keepScroll: true });
+}
+Cloud.onRemoteChange(refreshFromRemote);
+Cloud.onStatus((st) => {
+  showCloudStatus(st);
+  // İzlenen liste boşken "yükleniyor" yazısı eşitleme bitince güncellenir.
+  if (['ok', 'error'].includes(st.state) && Cloud.viewer() && currentPage() === '' && !refreshList) refreshFromRemote();
+});
+window.addEventListener('hashchange', () => showCloudStatus());
+
 // ---------- Başlat ----------
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
@@ -1005,5 +1304,10 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
 // Açılıştaki düzeltme bitmeden yedekten geri yükleme başlamaz (yazdıkları karışmasın).
+// Eşitleme de bu düzeltmeden sonra başlar.
 const storedRecordsNormalized = normalizeStoredRecords();
-storedRecordsNormalized.finally(route);
+showCloudStatus();
+storedRecordsNormalized.finally(() => {
+  route();
+  Cloud.start();
+});

@@ -1,36 +1,58 @@
 // Plak kayıtlarını tarayıcının IndexedDB veritabanında saklar.
 // Kapak görselleri Blob olarak tutulur; yedek dosyasında base64'e çevrilir.
+// 'sync' deposu internetteki kopyayla son eşitlenen hali tutar (bkz. bulut.js).
 const DB = (() => {
-  const NAME = 'plaklarim';
-  const VERSION = 1;
+  let name = 'plaklarim';
+  const VERSION = 2;
   const STORE = 'records';
+  const SYNC = 'sync';
   let dbPromise;
+  const listeners = [];
+
+  // Başka birinin plaklarını izleyen cihaz ayrı veritabanı kullanır; kendi plakları
+  // karışmaz. Veritabanı açılmadan önce çağrılmalı; açıldıysa false döner.
+  function useName(next) {
+    if (dbPromise) return next === name;
+    name = next;
+    return true;
+  }
 
   function open() {
     if (!dbPromise) {
       dbPromise = new Promise((resolve, reject) => {
-        const req = indexedDB.open(NAME, VERSION);
+        const req = indexedDB.open(name, VERSION);
         req.onupgradeneeded = () => {
           const db = req.result;
           if (!db.objectStoreNames.contains(STORE)) {
             const store = db.createObjectStore(STORE, { keyPath: 'id' });
             store.createIndex('artist', 'artist');
           }
+          if (!db.objectStoreNames.contains(SYNC)) db.createObjectStore(SYNC, { keyPath: 'id' });
         };
-        req.onsuccess = () => resolve(req.result);
+        req.onsuccess = () => {
+          // Yeni sürüm başka sekmede açılınca bu bağlantı kapanır, yoksa onu bekletirdi.
+          req.result.onversionchange = () => req.result.close();
+          resolve(req.result);
+        };
         req.onerror = () => reject(req.error);
+        // Eski sürüm başka bir pencerede açıksa yeni sürüm onun kapanmasını bekler.
+        req.onblocked = () => {
+          const view = document.getElementById('view');
+          if (view) view.innerHTML = '<p class="empty">Plaklarım başka bir pencerede de açık. Onu kapatıp bu sayfayı yenile.</p>';
+        };
       });
     }
     return dbPromise;
   }
 
-  async function tx(mode, fn) {
+  // fn depoları alır (tek depoda doğrudan depoyu); sonucu işlem bitince döner.
+  async function tx(mode, fn, stores = STORE) {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const t = db.transaction(STORE, mode);
-      const store = t.objectStore(STORE);
+      const t = db.transaction(stores, mode);
+      const arg = Array.isArray(stores) ? stores.map((s) => t.objectStore(s)) : t.objectStore(stores);
       let result;
-      Promise.resolve(fn(store)).then((r) => { result = r; });
+      Promise.resolve(fn(arg)).then((r) => { result = r; });
       t.oncomplete = () => resolve(result);
       t.onerror = () => reject(t.error);
       t.onabort = () => reject(t.error);
@@ -47,11 +69,39 @@ const DB = (() => {
       Date.now().toString(36) + Math.random().toString(36).slice(2);
   }
 
+  // Kullanıcının yaptığı değişiklikler (kaydet, sil, geri yükle) dinleyicilere bildirilir.
+  const changed = (result) => {
+    listeners.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
+    return result;
+  };
+
   return {
     newId,
+    useName,
+    onChange: (fn) => listeners.push(fn),
     all: () => tx('readonly', (s) => request(s.getAll())),
     get: (id) => tx('readonly', (s) => request(s.get(id))),
-    put: (record) => tx('readwrite', (s) => request(s.put(record))),
-    remove: (id) => tx('readwrite', (s) => request(s.delete(id))),
+    put: (record) => tx('readwrite', (s) => request(s.put(record))).then(changed),
+    remove: (id) => tx('readwrite', (s) => request(s.delete(id))).then(changed),
+
+    // Eşitleme: plak, check(şimdiki hali) doğruysa next ile değiştirilir (next null ise
+    // silinir) ve eşitleme kaydı (entry; null ise silinir) aynı işlemde yazılır.
+    // Bu arada plak bu cihazda değiştirildiyse dokunulmaz, false döner.
+    swap: (id, check, next, entry) => tx('readwrite', ([records, sync]) => new Promise((resolve) => {
+      const get = records.get(id);
+      get.onsuccess = () => {
+        if (!check(get.result)) { resolve(false); return; }
+        if (next) records.put(next); else records.delete(id);
+        if (entry) sync.put(entry); else sync.delete(id);
+        resolve(true);
+      };
+    }), [STORE, SYNC]),
+    syncAll: () => tx('readonly', (s) => request(s.getAll()), SYNC),
+    syncGet: (id) => tx('readonly', (s) => request(s.get(id)), SYNC),
+    syncPut: (entry) => tx('readwrite', (s) => request(s.put(entry)), SYNC),
+    syncRemove: (id) => tx('readwrite', (s) => request(s.delete(id)), SYNC),
+    syncClear: () => tx('readwrite', (s) => request(s.clear()), SYNC),
+    // İzleme bırakılınca o veritabanı boşaltılır.
+    clearAll: () => tx('readwrite', ([records, sync]) => { records.clear(); sync.clear(); }, [STORE, SYNC]),
   };
 })();
