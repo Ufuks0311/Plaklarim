@@ -52,10 +52,11 @@ const DB = (() => {
       const t = db.transaction(stores, mode);
       const arg = Array.isArray(stores) ? stores.map((s) => t.objectStore(s)) : t.objectStore(stores);
       let result;
-      Promise.resolve(fn(arg)).then((r) => { result = r; });
+      let failed = null;
+      Promise.resolve(fn(arg)).then((r) => { result = r; }, (err) => { failed = err; });
       t.oncomplete = () => resolve(result);
-      t.onerror = () => reject(t.error);
-      t.onabort = () => reject(t.error);
+      t.onerror = () => reject(t.error || failed);
+      t.onabort = () => reject(t.error || failed || new DOMException('Kayıt yarıda kaldı.', 'AbortError'));
     });
   }
 
@@ -67,6 +68,25 @@ const DB = (() => {
   function newId() {
     return (crypto.randomUUID && crypto.randomUUID()) ||
       Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+
+  // Kaydedilecek plaktaki görseller (kapaklar) bellekte yeni bir kopyaya alınır.
+  // Veritabanından okunan görsel olduğu gibi yeniden kaydedilince iPhone'da
+  // (Safari) bozulabiliyor: plak düzenlenip kaydedilince kapaklar görünmüyordu.
+  // Okunamayan (zaten bozuk) görsel olduğu gibi bırakılır; adı unreadable'da döner.
+  async function detach(record) {
+    const copy = { ...record };
+    const unreadable = [];
+    for (const [key, value] of Object.entries(record)) {
+      if (!(value instanceof Blob)) continue;
+      try {
+        copy[key] = new Blob([await value.arrayBuffer()], { type: value.type });
+      } catch (err) {
+        console.error(err);
+        unreadable.push(key);
+      }
+    }
+    return { copy, unreadable };
   }
 
   // Kullanıcının yaptığı değişiklikler (kaydet, sil, geri yükle) dinleyicilere bildirilir.
@@ -81,21 +101,38 @@ const DB = (() => {
     onChange: (fn) => listeners.push(fn),
     all: () => tx('readonly', (s) => request(s.getAll())),
     get: (id) => tx('readonly', (s) => request(s.get(id))),
-    put: (record) => tx('readwrite', (s) => request(s.put(record))).then(changed),
+    // Görsel bu cihazda açılabiliyor mu (iPhone'da veritabanındaki görsel bozulabiliyor).
+    readable: (blob) => blob.slice(0, 1).arrayBuffer().then(() => true, () => false),
+    // Bozuk (açılamayan) görsel yüzünden kaydedilemezse hatanın unreadable'ında o
+    // görsellerin adları döner. Görsel kendiliğinden silinmez: silinmiş sayılıp
+    // internetteki sağlam kopyası da silinirdi.
+    put: async (record) => {
+      const { copy, unreadable } = await detach(record);
+      try {
+        await tx('readwrite', (s) => request(s.put(copy)));
+      } catch (err) {
+        if (unreadable.length && err) err.unreadable = unreadable;
+        throw err;
+      }
+      return changed(copy.id);
+    },
     remove: (id) => tx('readwrite', (s) => request(s.delete(id))).then(changed),
 
     // Eşitleme: plak, check(şimdiki hali) doğruysa next ile değiştirilir (next null ise
     // silinir) ve eşitleme kaydı (entry; null ise silinir) aynı işlemde yazılır.
     // Bu arada plak bu cihazda değiştirildiyse dokunulmaz, false döner.
-    swap: (id, check, next, entry) => tx('readwrite', ([records, sync]) => new Promise((resolve) => {
-      const get = records.get(id);
-      get.onsuccess = () => {
-        if (!check(get.result)) { resolve(false); return; }
-        if (next) records.put(next); else records.delete(id);
-        if (entry) sync.put(entry); else sync.delete(id);
-        resolve(true);
-      };
-    }), [STORE, SYNC]),
+    swap: async (id, check, next, entry) => {
+      const copy = next && (await detach(next)).copy;
+      return tx('readwrite', ([records, sync]) => new Promise((resolve) => {
+        const get = records.get(id);
+        get.onsuccess = () => {
+          if (!check(get.result)) { resolve(false); return; }
+          if (copy) records.put(copy); else records.delete(id);
+          if (entry) sync.put(entry); else sync.delete(id);
+          resolve(true);
+        };
+      }), [STORE, SYNC]);
+    },
     syncAll: () => tx('readonly', (s) => request(s.getAll()), SYNC),
     syncGet: (id) => tx('readonly', (s) => request(s.get(id)), SYNC),
     syncPut: (entry) => tx('readwrite', (s) => request(s.put(entry)), SYNC),

@@ -242,6 +242,9 @@ const Cloud = (() => {
   // now: kullanıcı bir şey denedi (bağlan, bağlantı oluştur); kendiliğinden yeniden denenmez.
   function explain(err, c = config, now = false) {
     const viewer = c?.mode === 'viewer';
+    if (['NotReadableError', 'NotFoundError'].includes(err?.name)) {
+      return 'Bir plağın kapak resmi bu cihazda açılamıyor; plağı açıp kapağı yeniden çek.';
+    }
     if (!(err instanceof ApiError)) return err?.message || 'Bilinmeyen bir hata oluştu.';
     if (err.status === 0) return now ? 'İnternet bağlantısı yok; bağlanınca yeniden dene.' : 'İnternet bağlantısı yok; bağlanınca eşitlenecek.';
     if (err.rateLimited) {
@@ -322,6 +325,8 @@ const Cloud = (() => {
   }
 
   const isBlob = (v) => v instanceof Blob;
+  // Görsel bu cihazda okunabiliyor mu (iPhone'da veritabanındaki görsel bozulabiliyor).
+  const readable = (blob) => DB.readable(blob);
   // Yalnızca resim türleri; SVG gibi içinde betik taşıyabilen türler kabul edilmez.
   const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
   const imageType = (type) => (Object.hasOwn(EXT, String(type).toLowerCase()) ? String(type).toLowerCase() : null);
@@ -337,25 +342,36 @@ const Cloud = (() => {
     return canon(out);
   }
 
-  // Plağın internetteki hali ve yüklenecek görselleri.
-  async function remoteForm(record) {
+  // Plağın internetteki hali ve yüklenecek görselleri. Bu cihazda açılamayan
+  // (bozulmuş) kapak yüklenmez; keep'te (internetteki hali) varsa o kopyası
+  // korunur ve kapağın adı broken'da döner (sonra oradan onarılır).
+  async function remoteForm(record, keep = null) {
     const out = {};
     const blobs = [];
+    const broken = [];
     for (const [k, v] of Object.entries(record)) {
       if (COVERS.includes(k)) {
+        let sha = null;
         if (isBlob(v)) {
-          const type = imageType(v.type) || 'image/jpeg';
-          const ref = { sha: await gitSha(v), type };
+          try {
+            sha = await gitSha(v);
+          } catch (err) {
+            console.error(err);
+            broken.push(k);
+          }
+        }
+        if (sha) {
+          const ref = { sha, type: imageType(v.type) || 'image/jpeg' };
           blobs.push({ ...ref, blob: v });
           out[k] = ref;
         } else {
-          out[k] = null;
+          out[k] = isBlob(v) && isRef(keep?.[k]) ? keep[k] : null;
         }
       } else if (!isBlob(v)) {
         out[k] = v;
       }
     }
-    return { obj: out, data: canon(out), blobs };
+    return { obj: out, data: canon(out), blobs, broken };
   }
 
   const validRemote = (r) => Boolean(r) && typeof r === 'object' && !Array.isArray(r)
@@ -601,8 +617,8 @@ const Cloud = (() => {
     const total = pulls.length + drops.length;
     const progress = () => setStatus({ state: 'busy', progress: true, text: `İndiriliyor: ${pulled} / ${total} plak` });
 
-    // Bu cihazda değişmemiş plakların görselleri yeniden indirilmez.
-    const images = new Map();
+    // Bu cihazda değişmemiş plakların görselleri yeniden indirilmez (açılamıyorsa indirilir).
+    const images = new Map(); // sha → bu cihazdaki görsel ya da indirme
     if (pulls.length) {
       locals.forEach((L) => {
         const E = entries.get(L.id);
@@ -614,6 +630,8 @@ const Cloud = (() => {
       });
     }
     async function image(ref) {
+      const local = images.get(ref.sha);
+      if (isBlob(local) && !await readable(local)) images.delete(ref.sha);
       if (!images.has(ref.sha)) {
         images.set(ref.sha, (async () => {
           // İzleyenler sahibin saatlik istek hakkını paylaşır; azalınca durup sonra sürer.
@@ -653,8 +671,10 @@ const Cloud = (() => {
 
     // Gönderilecekler: önce internetteki haliyle karşılaştırılır.
     const outgoing = [];
+    const repairs = []; // bu cihazda açılamayan, internetteki kopyasıyla onarılacak kapaklar
     for (const p of pushes) {
-      const form = await remoteForm(p.L);
+      const form = await remoteForm(p.L, p.R);
+      if (form.broken.some((k) => isRef(form.obj[k]))) repairs.push({ id: p.id, lfp: p.lfp, form });
       if (p.R && form.data === p.rdata) {
         await DB.syncPut({ id: p.id, fp: p.lfp, data: p.rdata });
         continue;
@@ -712,8 +732,50 @@ const Cloud = (() => {
       }
     }
 
+    // Açılamayan kapaklar internetteki kopyalarıyla değiştirilir.
+    for (const { id, lfp, form } of repairs) {
+      try {
+        const next = { ...local.get(id) };
+        for (const k of form.broken) if (isRef(form.obj[k])) next[k] = await image(form.obj[k]);
+        if (await DB.swap(id, (cur) => fingerprint(cur) === lfp, next, { id, fp: fingerprint(next), data: form.data })) remoteChanged();
+      } catch (err) {
+        console.error(err); // bir dahaki eşitlemede ya da plak açılınca yeniden denenir
+      }
+    }
+
     // Bu arada bu cihazda değişen plak olduysa bir sonraki eşitlemede ele alınır.
     return finish(meta, remote.commit, pulled, skipped > 0);
+  }
+
+  // Plak sayfasında açılamayan kapak, son eşitlenen halinden (internetteki kopyası)
+  // yeniden indirilir. Plak o zamandan beri bu cihazda değiştiyse dokunulmaz.
+  // Her plak için uygulama açık kaldıkça bir kez denenir; internete ulaşılamadıysa
+  // ya da force verildiyse (kaydederken) yeniden denenir.
+  const repairTried = new Set();
+  async function repairCovers(id, force = false) {
+    const c = config;
+    if (!c || (!force && repairTried.has(id))) return false;
+    repairTried.add(id);
+    return withLock(async () => {
+      const [L, E] = await Promise.all([DB.get(id), DB.syncGet(id)]);
+      if (!L || !E || E.fp !== fingerprint(L)) return false;
+      let data;
+      try { data = JSON.parse(E.data); } catch { return false; }
+      const next = { ...L };
+      let fixed = false;
+      for (const k of COVERS) {
+        if (!isBlob(L[k]) || !isRef(data[k]) || await readable(L[k])) continue;
+        const res = await github(c, `git/blobs/${data[k].sha}`, { raw: true, fresh: false });
+        const blob = new Blob([await res.arrayBuffer()], { type: imageType(data[k].type) || 'image/jpeg' });
+        if (await gitSha(blob) !== data[k].sha) continue;
+        next[k] = blob;
+        fixed = true;
+      }
+      return fixed && DB.swap(id, (cur) => fingerprint(cur) === E.fp, next, { id, fp: fingerprint(next), data: E.data });
+    }).catch((err) => {
+      repairTried.delete(id);
+      throw err;
+    });
   }
 
   // retry: bazı plaklar bu arada bu cihazda değişti; internetteki hal bir sonraki
@@ -997,6 +1059,7 @@ const Cloud = (() => {
     connect,
     makeViewLink,
     checkViewLink,
+    repairCovers,
     disconnect,
     stopViewing,
     syncNow: () => run(),
