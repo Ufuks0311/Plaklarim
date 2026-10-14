@@ -1127,7 +1127,15 @@ function renderCloud() {
       <div class="actions">
         <button class="btn" id="syncNow">Şimdi yenile</button>
         <button class="btn danger" id="stopViewing">İzlemeyi bırak</button>
-      </div>`;
+      </div>
+      <section>
+        <h2>Yeni bağlantı aldıysan</h2>
+        <form class="cloud-form" id="connectForm">
+          <input id="connectInput" placeholder="https://…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="İzleme bağlantısı">
+          <button class="btn primary">Aç</button>
+        </form>
+        <p class="error" id="connectError" hidden></p>
+      </section>`;
   } else {
     body = `
       <p>Plakların <b>${esc(info.owner)}/${repo}</b> gizli deposunda saklanıyor; bu cihazda yaptığın
@@ -1222,6 +1230,13 @@ function renderCloud() {
     toast('İzleme bağlantısı hazır; paylaşabilirsin.');
     if (currentPage() === 'bulut') renderCloud();
   });
+
+  // Okuma anahtarı GitHub'da silindiyse paylaşma düğmesi kaldırılır.
+  if (info?.hasViewLink) {
+    Cloud.checkViewLink().then((ok) => {
+      if (!ok && currentPage() === 'bulut') renderCloud();
+    });
+  }
 
   document.getElementById('syncNow')?.addEventListener('click', () => Cloud.syncNow());
   document.getElementById('shareDevice')?.addEventListener('click', () => shareLink(Cloud.deviceLink(), 'Plaklarım: cihaz bağlantısı'));

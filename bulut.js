@@ -120,7 +120,8 @@ const Cloud = (() => {
         notice = 'Bu cihaz zaten bağlı.';
         return false;
       }
-      const viewToken = link.viewToken || (config?.mode === 'owner' && sameRepo(config, link) && config.viewToken);
+      const own = config?.mode === 'owner' ? config : config?.previous;
+      const viewToken = link.viewToken || (own && sameRepo(own, link) && own.viewToken);
       saveConfig({ ...link, ...(viewToken && { viewToken }) });
       notice = 'Bu cihaz bağlandı; plaklar eşitleniyor.';
     }
@@ -130,10 +131,15 @@ const Cloud = (() => {
   // Adres çubuğundan gelen bağlantı (biri göndermiş olabilir) sorulmadan
   // kullanılmaz: başkasının listesine bağlanmak bu cihazdaki plakları oraya yükler.
   function confirmLink(link) {
-    if (!link || (config && sameRepo(config, link) && config.mode === link.mode)) return true;
+    if (!link || (config && sameRepo(config, link) && (config.mode === link.mode || config.mode === 'owner'))) return true;
+    // Bu cihazın kendi listesi (izlerken kenarda duran dahil).
+    const own = config?.mode === 'owner' ? config : config?.previous || null;
+    const cut = own && !sameRepo(own, link);
     if (link.mode === 'owner') {
-      return confirm(`Bu cihaz ${link.owner} kullanıcısının plak listesine bağlanacak; bu cihazdaki plaklar da o listeye eklenecek.`
-        + (config?.mode === 'owner' ? ` Şu anki bağlantın (${config.owner}/${config.repo}) kesilecek.` : '')
+      if (own && !cut) return true; // kendi listesine yeniden bağlanıyor
+      return confirm(`Bu cihaz ${link.owner} kullanıcısının plak listesine bağlanacak; `
+        + (config?.mode === 'viewer' && own ? `kendi plakların da (${own.owner}/${own.repo}) o listeye eklenecek.` : 'bu cihazdaki plaklar da o listeye eklenecek.')
+        + (cut ? ` Şu anki bağlantın (${own.owner}/${own.repo}) kesilecek.` : '')
         + '\n\nBağlantıyı sen gönderdiysen "Tamam"a bas.');
     }
     if (config?.mode === 'owner') {
@@ -243,7 +249,7 @@ const Cloud = (() => {
         : 'GitHub kısa süreliğine sınır koydu; biraz sonra kaldığı yerden sürecek.';
     }
     if (err.status === 401) {
-      return viewer ? 'Bu izleme bağlantısı artık geçerli değil; yeni bağlantı iste.'
+      return viewer ? 'Bu izleme bağlantısı artık geçerli değil; yeni bağlantı iste ve İzleme sayfasına yapıştır.'
         : 'Anahtar geçersiz, süresi dolmuş ya da silinmiş. İnternette saklama sayfasında "Anahtarı yenile"ye yeni anahtar gir.';
     }
     if (err.status === 403) {
@@ -251,7 +257,7 @@ const Cloud = (() => {
         : 'Anahtarın yazma izni yok. Anahtarı oluştururken "Contents" iznini "Read and write" seç.';
     }
     if (err.status === 404) {
-      return viewer ? 'Bu izleme bağlantısı artık geçerli değil; yeni bağlantı iste.'
+      return viewer ? 'Bu izleme bağlantısı artık geçerli değil; yeni bağlantı iste ve İzleme sayfasına yapıştır.'
         : `${c?.repo || REPO_NAME} deposu bulunamadı ya da anahtar bu depoya erişemiyor.`;
     }
     return `GitHub hatası (${err.status}): ${err.message}`;
@@ -368,18 +374,22 @@ const Cloud = (() => {
       if (validRemote(r) && !records.has(r.id)) records.set(r.id, r);
       else extra.push(r);
     });
-    return { records, extra };
+    const list = typeof data.list === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(data.list) ? data.list : null;
+    return { records, extra, list };
   }
 
-  function buildData(records, extra) {
+  // list: listenin kimliği; liste baştan kurulunca (depo silinip yeniden açıldı)
+  // değişir ve her cihaz eski eşitleme bilgisini bırakır.
+  function buildData(records, extra, list) {
     const lines = [...records.values()]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .map(canon)
       .concat(extra.map((r) => JSON.stringify(r)));
-    return `{"app":"plaklarim","version":1,"records":[\n${lines.join(',\n')}\n]}\n`;
+    const head = `"app":"plaklarim","version":1,${list ? `"list":${JSON.stringify(list)},` : ''}`;
+    return `{${head}"records":[\n${lines.join(',\n')}\n]}\n`;
   }
 
-  const emptyRemote = () => ({ commit: null, tree: null, files: new Map(), records: new Map(), extra: [] });
+  const emptyRemote = () => ({ commit: null, tree: null, files: new Map(), records: new Map(), extra: [], list: null });
 
   // Bir değişiklikteki bütün dosyalar ve plaklar.
   let snapshot = null; // son okunan; aynı değişiklik yeniden indirilmez
@@ -390,7 +400,7 @@ const Cloud = (() => {
     const tree = await github(c, `git/trees/${commit.tree.sha}?recursive=1`, { fresh: false });
     if (tree.truncated) throw new Error('İnternetteki depo okunamayacak kadar büyük.');
     const files = new Map(tree.tree.filter((e) => e.type === 'blob').map((e) => [e.path, e.sha]));
-    let parsed = { records: new Map(), extra: [] };
+    let parsed = { records: new Map(), extra: [], list: null };
     if (files.has(DATA_FILE)) {
       const res = await github(c, `git/blobs/${files.get(DATA_FILE)}`, { raw: true, fresh: false });
       parsed = parseData(await res.text());
@@ -427,7 +437,7 @@ const Cloud = (() => {
     [...records.values(), ...remote.extra].forEach((r) => COVERS.forEach((k) => {
       if (isRef(r?.[k]) && has(r[k].sha)) wanted.set(imagePath(r[k]), r[k].sha);
     }));
-    const tree = [{ path: DATA_FILE, mode: '100644', type: 'blob', content: buildData(records, remote.extra) }];
+    const tree = [{ path: DATA_FILE, mode: '100644', type: 'blob', content: buildData(records, remote.extra, remote.list) }];
     wanted.forEach((sha, path) => {
       if (remote.files.get(path) !== sha) tree.push({ path, mode: '100644', type: 'blob', sha });
     });
@@ -499,7 +509,10 @@ const Cloud = (() => {
     if (!meta || meta.repo !== repoKey) {
       // Başka bir depoya bağlanıldı: eski eşitleme bilgisi geçersiz. İzleyen cihazda
       // önceki listenin plakları da silinir.
-      if (viewer) await DB.clearAll();
+      if (viewer) {
+        await DB.clearAll();
+        remoteChanged();
+      }
       await resetBase();
     }
 
@@ -514,12 +527,19 @@ const Cloud = (() => {
     if (head === meta.commit && !localChanged) return finish(meta, head, 0);
 
     let remote = head ? await loadRemote(c, head) : emptyRemote();
-    if (!viewer && entries.size && !remote.files.has(DATA_FILE)) {
-      // İnternetteki liste yok (depo silinip yeniden açılmış ya da boşaltılmış): bu,
-      // plakların silindiği anlamına gelmez (uygulama listeyi hiç silmez). Bu
-      // cihazdaki plaklar yeni sayılıp yüklenir.
+    // İnternetteki liste yoksa (depo silinip yeniden açılmış ya da boşaltılmış) ya da
+    // başka bir cihaz onu baştan kurmuşsa (kimliği değişmiş), eski eşitleme bilgisi
+    // geçersizdir: plakların silindiği anlamına gelmez. İki taraftaki plaklar
+    // birleştirilir (aynı plakta son değiştirilen kalır), hiçbiri silinmez.
+    const fresh = !remote.files.has(DATA_FILE);
+    if (!viewer && entries.size && (fresh || remote.list !== (meta.list ?? null))) {
       await resetBase();
       entries = new Map();
+    }
+    if (fresh) remote.list = DB.newId();
+    if (!viewer && meta.list !== remote.list) {
+      meta = { ...meta, list: remote.list };
+      await DB.syncPut(meta);
     }
     const skip = new Set(remote.extra.map((r) => r?.id).filter((id) => typeof id === 'string'));
 
@@ -656,6 +676,7 @@ const Cloud = (() => {
         await initRepo(c);
         head = await headCommit(c);
         remote = await loadRemote(c, head);
+        remote.list = remote.list || meta.list;
         if (remote.files.has(DATA_FILE)) {
           // Başka bir cihaz bu arada kaydetti: onun plakları alınarak yeniden planlanır.
           const err = new Error('yeniden');
@@ -756,6 +777,7 @@ const Cloud = (() => {
     for (let attempt = 0; ; attempt++) {
       try {
         await withLock(() => syncOnce(c));
+        blockedUntil = 0;
         if (config === c) setStatus({ state: 'ok', text: '', at: lastAt });
         return;
       } catch (err) {
@@ -769,7 +791,7 @@ const Cloud = (() => {
           await DB.clearAll().catch(console.error);
           remoteChanged();
         }
-        setStatus({ state: offline ? 'offline' : 'error', text: explain(err, c), code: err.status || 0, at: lastAt });
+        setStatus({ state: offline ? 'offline' : 'error', text: explain(err, c), code: err.rateLimited ? 429 : err.status || 0, at: lastAt });
         if (err.rateLimited) {
           blockedUntil = Math.max(err.retryAt || 0, Date.now() + 60000);
           if (!err.retryAt) blockedUntil = Date.now() + 15 * 60000;
@@ -804,12 +826,23 @@ const Cloud = (() => {
 
   // ---------- Ayar ekranının işleri ----------
 
+  // Yalnızca depo seçilebilen yeni tip anahtarlar (github_pat_…); eski tip (classic)
+  // anahtarlar bütün depolara erişir.
+  function checkToken(token) {
+    if (/^gh[opsu]_/.test(token)) {
+      throw new Error('Bu eski tip (classic) bir anahtar ve bütün depolarını açar. Sayfadaki "Anahtar oluştur" düğmesiyle yeni tip anahtar oluştur.');
+    }
+    if (!TOKEN.test(token) || !token.startsWith('github_pat_')) {
+      throw new Error('Bu bir GitHub anahtarına benzemiyor. "github_pat_" ile başlayan anahtarın tamamını yapıştır.');
+    }
+  }
+
   // Anahtar Plaklarim-veri dışında başka gizli bir depoyu da okuyabiliyorsa o deponun
   // adı döner. Bağlantıyla paylaşılan anahtar yalnızca bu depoya erişmeli.
   async function otherRepoReadable(c, token) {
     let list;
     try {
-      list = await github(c, '/user/repos?visibility=private&affiliation=owner&per_page=100', { token });
+      list = await github(c, '/user/repos?visibility=private&per_page=100', { token });
     } catch {
       return null; // anlaşılamadı; engellenmez
     }
@@ -838,6 +871,7 @@ const Cloud = (() => {
       const viewerBefore = config?.mode === 'viewer';
       const link = parseLink(input);
       if (!link) throw new Error('Bağlantı eksik ya da bozuk; tamamını kopyaladığından emin ol.');
+      if (!confirmLink(link)) throw new Error('Bağlantı kullanılmadı.');
       if (applyLink(link)) {
         if (viewerBefore) await DB.clearAll();
         return 'reload';
@@ -848,9 +882,7 @@ const Cloud = (() => {
       return n;
     }
     const token = input.replace(/^(Bearer|token)\s+/i, '');
-    if (!TOKEN.test(token)) {
-      throw new Error('Bu bir GitHub anahtarına benzemiyor. "github_pat_" ile başlayan anahtarın tamamını yapıştır.');
-    }
+    checkToken(token);
     const probe = { owner: '-', repo: '-', branch: 'main', token };
     let user;
     try {
@@ -882,8 +914,9 @@ const Cloud = (() => {
     const other = await otherRepoReadable(c, token);
     if (other) throw scopeError(c, other);
     const viewerBefore = config?.mode === 'viewer';
-    const keepView = config?.mode === 'owner' && sameRepo(config, c) && config.viewToken;
-    saveConfig({ ...c, ...(keepView && { viewToken: config.viewToken }) });
+    const own = config?.mode === 'owner' ? config : config?.previous;
+    const keepView = own && sameRepo(own, c) && own.viewToken;
+    saveConfig({ ...c, ...(keepView && { viewToken: keepView }) });
     if (!DB.useName(dbName())) {
       if (viewerBefore) await DB.clearAll();
       return 'reload';
@@ -898,7 +931,7 @@ const Cloud = (() => {
     const c = config;
     if (c?.mode !== 'owner') throw new Error('Önce bu cihazı bağla.');
     const token = String(text || '').trim().replace(/^(Bearer|token)\s+/i, '');
-    if (!TOKEN.test(token)) throw new Error('Bu bir GitHub anahtarına benzemiyor; anahtarın tamamını yapıştır.');
+    checkToken(token);
     if (token === c.token) throw new Error('Bu, bu cihazın yazma anahtarı. İzleme için yalnızca okuma izni olan ayrı bir anahtar oluştur.');
     try {
       await github(c, '', { token });
@@ -922,6 +955,21 @@ const Cloud = (() => {
     if (other) throw scopeError(c, other);
     saveConfig({ ...c, viewToken: token });
     return linkFor('izle', c, token);
+  }
+
+  // Paylaşılacak izleme bağlantısı hâlâ çalışıyor mu (okuma anahtarı silinmiş olabilir).
+  // Çalışmıyorsa unutulur; false döner.
+  async function checkViewLink() {
+    const c = config;
+    if (c?.mode !== 'owner' || !c.viewToken) return false;
+    try {
+      await github(c, `git/ref/heads/${branchPath(c)}`, { token: c.viewToken });
+      return true;
+    } catch (err) {
+      if (![401, 403, 404].includes(err.status) || err.rateLimited) return true; // anlaşılamadı
+      if (config === c) saveConfig({ ...c, viewToken: undefined });
+      return false;
+    }
   }
 
   function disconnect() {
@@ -948,6 +996,7 @@ const Cloud = (() => {
     start,
     connect,
     makeViewLink,
+    checkViewLink,
     disconnect,
     stopViewing,
     syncNow: () => run(),
