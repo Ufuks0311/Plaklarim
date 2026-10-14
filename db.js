@@ -52,10 +52,11 @@ const DB = (() => {
       const t = db.transaction(stores, mode);
       const arg = Array.isArray(stores) ? stores.map((s) => t.objectStore(s)) : t.objectStore(stores);
       let result;
-      Promise.resolve(fn(arg)).then((r) => { result = r; });
+      let failed = null;
+      Promise.resolve(fn(arg)).then((r) => { result = r; }, (err) => { failed = err; });
       t.oncomplete = () => resolve(result);
-      t.onerror = () => reject(t.error);
-      t.onabort = () => reject(t.error);
+      t.onerror = () => reject(t.error || failed);
+      t.onabort = () => reject(t.error || failed || new DOMException('Kayıt yarıda kaldı.', 'AbortError'));
     });
   }
 
@@ -100,16 +101,18 @@ const DB = (() => {
     onChange: (fn) => listeners.push(fn),
     all: () => tx('readonly', (s) => request(s.getAll())),
     get: (id) => tx('readonly', (s) => request(s.get(id))),
-    // Bozuk görsel yüzünden kaydedilemezse plak o görsel olmadan kaydedilir.
+    // Görsel bu cihazda açılabiliyor mu (iPhone'da veritabanındaki görsel bozulabiliyor).
+    readable: (blob) => blob.slice(0, 1).arrayBuffer().then(() => true, () => false),
+    // Bozuk (açılamayan) görsel yüzünden kaydedilemezse hatanın unreadable'ında o
+    // görsellerin adları döner. Görsel kendiliğinden silinmez: silinmiş sayılıp
+    // internetteki sağlam kopyası da silinirdi.
     put: async (record) => {
       const { copy, unreadable } = await detach(record);
       try {
         await tx('readwrite', (s) => request(s.put(copy)));
       } catch (err) {
-        if (!unreadable.length) throw err;
-        console.error(err);
-        unreadable.forEach((key) => { copy[key] = null; });
-        await tx('readwrite', (s) => request(s.put(copy)));
+        if (unreadable.length && err) err.unreadable = unreadable;
+        throw err;
       }
       return changed(copy.id);
     },

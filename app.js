@@ -184,7 +184,8 @@ async function normalizeStoredRecords() {
     for (const record of await DB.all()) {
       if ((record.casingVersion || 0) >= CASING_VERSION) continue;
       const fixed = normalizeForStorage(record);
-      if (JSON.stringify(fixed) !== JSON.stringify(record)) await DB.put(fixed);
+      // Kaydedilemeyen (kapağı açılamayan) plak bir sonraki açılışta yeniden denenir.
+      if (JSON.stringify(fixed) !== JSON.stringify(record)) await DB.put(fixed).catch(console.error);
     }
   } catch (err) {
     console.error(err);
@@ -1052,25 +1053,40 @@ async function renderForm(id) {
       casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
     if (!record.namesBeforeCasing && nameText(typed) !== nameText(record)) record.namesBeforeCasing = typed;
-    // Form açıkken plak başka bir cihazda değiştirildiyse (eşitlemeyle geldi), burada
-    // değiştirilmeyen alanlar ve kapaklar o yeni halinden alınır.
+    // Değiştirilmeyen kapaklar plağın şimdiki halinden alınır (form açıkken eşitleme
+    // ya da onarım değiştirmiş olabilir). Form açıkken plak başka bir cihazda
+    // değiştirildiyse (eşitlemeyle geldi), burada değiştirilmeyen alanlar da o yeni halinden alınır.
     const current = existing && await DB.get(existing.id);
+    const untouched = ['frontCover', 'backCover'].filter((k) => current && images[k] === (existing[k] || null));
+    untouched.forEach((k) => { record[k] = current[k] || null; });
     if (current && current.updatedAt !== existing.updatedAt) {
       const same = (a, b) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
       ['no', 'artist', 'album', 'year', 'genre', 'label', 'notes'].forEach((k) => {
         if (same(record[k], existing[k])) record[k] = current[k];
       });
       if (same(record.discs, discsOf(existing))) record.discs = discsOf(current);
-      ['frontCover', 'backCover'].forEach((k) => {
-        if (images[k] === (existing[k] || null)) record[k] = current[k] || null;
-      });
       if (current.namesBeforeCasing && !existing.namesBeforeCasing) record.namesBeforeCasing = current.namesBeforeCasing;
+    }
+    // Bu cihazda açılamayan (bozulmuş) kapak önce internetteki kopyasından onarılır.
+    const broken = async () => {
+      for (const k of untouched) if (record[k] instanceof Blob && !await DB.readable(record[k])) return true;
+      return false;
+    };
+    if (untouched.length && await broken()) {
+      const repair = Cloud.repairCovers(record.id, true).catch((err) => { console.error(err); return false; });
+      if (await Promise.race([repair, new Promise((done) => setTimeout(done, 10000, false))])) {
+        const now = await DB.get(record.id);
+        if (now) untouched.forEach((k) => { record[k] = now[k] || null; });
+      }
     }
     try {
       await DB.put(record);
     } catch (err) {
       console.error(err);
-      errorEl.textContent = `Kaydedilemedi: ${String(err.message || err).replace(/\.?$/, '.')} Açılmayan bir kapak varsa "Kaldır" ile silip yeniden çek.`;
+      const retry = Cloud.info()?.mode === 'owner' ? 'İnternete bağlıyken yeniden dene; olmazsa kapağı' : 'Kapağı';
+      errorEl.textContent = err.unreadable
+        ? `Kaydedilemedi: kapak bu cihazda açılamıyor. ${retry} "Kaldır" ile silip yeniden çek.`
+        : `Kaydedilemedi: ${String(err.message || err).replace(/\.?$/, '.')}`;
       errorEl.hidden = false;
       return;
     }

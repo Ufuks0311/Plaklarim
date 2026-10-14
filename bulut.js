@@ -326,7 +326,7 @@ const Cloud = (() => {
 
   const isBlob = (v) => v instanceof Blob;
   // Görsel bu cihazda okunabiliyor mu (iPhone'da veritabanındaki görsel bozulabiliyor).
-  const readable = (blob) => blob.slice(0, 1).arrayBuffer().then(() => true, () => false);
+  const readable = (blob) => DB.readable(blob);
   // Yalnızca resim türleri; SVG gibi içinde betik taşıyabilen türler kabul edilmez.
   const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
   const imageType = (type) => (Object.hasOwn(EXT, String(type).toLowerCase()) ? String(type).toLowerCase() : null);
@@ -749,11 +749,12 @@ const Cloud = (() => {
 
   // Plak sayfasında açılamayan kapak, son eşitlenen halinden (internetteki kopyası)
   // yeniden indirilir. Plak o zamandan beri bu cihazda değiştiyse dokunulmaz.
-  // Her plak için sayfa açık kaldıkça bir kez denenir.
+  // Her plak için uygulama açık kaldıkça bir kez denenir; internete ulaşılamadıysa
+  // ya da force verildiyse (kaydederken) yeniden denenir.
   const repairTried = new Set();
-  async function repairCovers(id) {
+  async function repairCovers(id, force = false) {
     const c = config;
-    if (!c || repairTried.has(id)) return false;
+    if (!c || (!force && repairTried.has(id))) return false;
     repairTried.add(id);
     return withLock(async () => {
       const [L, E] = await Promise.all([DB.get(id), DB.syncGet(id)]);
@@ -771,6 +772,9 @@ const Cloud = (() => {
         fixed = true;
       }
       return fixed && DB.swap(id, (cur) => fingerprint(cur) === E.fp, next, { id, fp: fingerprint(next), data: E.data });
+    }).catch((err) => {
+      repairTried.delete(id);
+      throw err;
     });
   }
 
