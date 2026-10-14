@@ -69,6 +69,23 @@ const DB = (() => {
       Date.now().toString(36) + Math.random().toString(36).slice(2);
   }
 
+  // Kaydedilecek plaktaki görseller (kapaklar) bellekte yeni bir kopyaya alınır.
+  // Veritabanından okunan görsel olduğu gibi yeniden kaydedilince iPhone'da
+  // (Safari) bozulabiliyor: plak düzenlenip kaydedilince kapaklar görünmüyordu.
+  // Okunamayan görsel olduğu gibi bırakılır.
+  async function detach(record) {
+    const out = { ...record };
+    for (const [key, value] of Object.entries(record)) {
+      if (!(value instanceof Blob)) continue;
+      try {
+        out[key] = new Blob([await value.arrayBuffer()], { type: value.type });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    return out;
+  }
+
   // Kullanıcının yaptığı değişiklikler (kaydet, sil, geri yükle) dinleyicilere bildirilir.
   const changed = (result) => {
     listeners.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
@@ -81,21 +98,27 @@ const DB = (() => {
     onChange: (fn) => listeners.push(fn),
     all: () => tx('readonly', (s) => request(s.getAll())),
     get: (id) => tx('readonly', (s) => request(s.get(id))),
-    put: (record) => tx('readwrite', (s) => request(s.put(record))).then(changed),
+    put: async (record) => {
+      const copy = await detach(record);
+      return tx('readwrite', (s) => request(s.put(copy))).then(changed);
+    },
     remove: (id) => tx('readwrite', (s) => request(s.delete(id))).then(changed),
 
     // Eşitleme: plak, check(şimdiki hali) doğruysa next ile değiştirilir (next null ise
     // silinir) ve eşitleme kaydı (entry; null ise silinir) aynı işlemde yazılır.
     // Bu arada plak bu cihazda değiştirildiyse dokunulmaz, false döner.
-    swap: (id, check, next, entry) => tx('readwrite', ([records, sync]) => new Promise((resolve) => {
-      const get = records.get(id);
-      get.onsuccess = () => {
-        if (!check(get.result)) { resolve(false); return; }
-        if (next) records.put(next); else records.delete(id);
-        if (entry) sync.put(entry); else sync.delete(id);
-        resolve(true);
-      };
-    }), [STORE, SYNC]),
+    swap: async (id, check, next, entry) => {
+      const copy = next && await detach(next);
+      return tx('readwrite', ([records, sync]) => new Promise((resolve) => {
+        const get = records.get(id);
+        get.onsuccess = () => {
+          if (!check(get.result)) { resolve(false); return; }
+          if (copy) records.put(copy); else records.delete(id);
+          if (entry) sync.put(entry); else sync.delete(id);
+          resolve(true);
+        };
+      }), [STORE, SYNC]);
+    },
     syncAll: () => tx('readonly', (s) => request(s.getAll()), SYNC),
     syncGet: (id) => tx('readonly', (s) => request(s.get(id)), SYNC),
     syncPut: (entry) => tx('readwrite', (s) => request(s.put(entry)), SYNC),

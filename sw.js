@@ -1,6 +1,6 @@
 // Uygulama dosyalarını önbelleğe alır; internet yokken de açılır.
 // Dosyalar değiştiğinde CACHE adını artır.
-const CACHE = 'plaklarim-v18';
+const CACHE = 'plaklarim-v19';
 const FILES = [
   './',
   'index.html',
@@ -10,7 +10,6 @@ const FILES = [
   'buyuk-harf-v1.js',
   'app.js',
   'katman.js',
-  'kamera.js',
   'kirpma.js',
   'kapak-okuma.js',
   'internetten-bilgi.js',

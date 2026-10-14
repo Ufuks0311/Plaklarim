@@ -446,7 +446,7 @@ const CoverCropper = (() => {
 
   const RETAKE = 'retake';
 
-  // Kareye oturtulmuş JPEG döndürür; vazgeçilirse null. onRetake verilirse
+  // "Seçimi kullan"a basılınca seçilen alanı kareye oturtulmuş JPEG olarak döndürür; vazgeçilirse null. onRetake verilirse
   // "Tekrar çek" düğmesi gösterilir; basılınca onRetake() dokunma anında
   // çağrılır ve RETAKE döner.
   async function open(file, maxSide, { onRetake } = {}) {
@@ -475,7 +475,7 @@ const CoverCropper = (() => {
         ${onRetake
     ? '<button type="button" class="btn" data-act="retake">Tekrar çek</button>'
     : '<button type="button" class="btn" data-act="cancel">Vazgeç</button>'}
-        <button type="button" class="btn primary" data-act="ok">Kareye oturt</button>
+        <button type="button" class="btn primary" data-act="ok">Seçimi kullan</button>
       </div>`;
     const hint = overlay.querySelector('.cropper-hint');
     const stage = overlay.querySelector('.cropper-stage');
