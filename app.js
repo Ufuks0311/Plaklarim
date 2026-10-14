@@ -263,7 +263,9 @@ window.addEventListener('hashchange', () => {
 });
 const sameHash = (a, b) => (a && a !== '#' ? a : '#/') === (b && b !== '#' ? b : '#/');
 function leaveTo(hash) {
+  if (sameHash(location.hash, hash)) return;
   if (previousHash !== null && sameHash(previousHash, hash)) {
+    previousHash = null; // ikinci dokunuş (çift tıklama) bir adım daha geri gitmesin
     history.back();
   } else {
     replacing = true;
@@ -859,7 +861,7 @@ async function renderForm(id) {
       to = discsEl.querySelector(`.tracks[data-side="${letter}"]`);
       // Şarkı, o yüzün diğer şarkıları arasında n. sıraya girer.
       const others = filled(to).filter((other) => other !== row);
-      before = others[n - 1] || (others.length ? others.at(-1).nextElementSibling : null);
+      before = others[n - 1] || (others.length ? others.at(-1).nextElementSibling : to.querySelector('.track-row'));
     }
     if (before === row) before = row.nextElementSibling;
     if (!to || (to === from && before === row.nextElementSibling)) {
@@ -874,7 +876,8 @@ async function renderForm(id) {
     const list = to.querySelector('.track-rows');
     list.insertBefore(row, before?.parentElement === list ? before : null);
     if (to !== from) {
-      to.querySelectorAll('.track-row').forEach((other) => { if (other !== row && isEmptyRow(other)) other.remove(); });
+      // Boş satırlar kalkar; o an yazılan (dokunulan ya da "+ Şarkı ekle" ile açılan) satır kalır.
+      to.querySelectorAll('.track-row').forEach((other) => { if (other !== row && isEmptyRow(other) && !other.contains(active)) other.remove(); });
       if (!from.querySelector('.track-row')) {
         from.querySelector('.track-rows').insertAdjacentHTML('beforeend', trackRow(undefined, from.dataset.side, 0));
       }
@@ -1040,14 +1043,31 @@ async function renderForm(id) {
     leaveTo(e.currentTarget.getAttribute('href'));
   });
 
+  // Kaydederken (kapak onarımı birkaç saniye sürebilir) Kaydet kapalı kalır; ikinci
+  // dokunuş ikinci kez kaydetmez.
+  let saving = false;
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (saving) return;
+    saving = true;
+    const submitBtn = e.target.querySelector('button[type=submit]');
+    submitBtn.disabled = true;
+    try {
+      await saveForm(e.target);
+    } finally {
+      saving = false;
+      submitBtn.disabled = false;
+    }
+  });
+
+  async function saveForm(form) {
     runPendingMove();
     normalizeFormText(null);
-    const f = new FormData(e.target);
+    const f = new FormData(form);
     const artist = f.get('artist').trim();
     const album = f.get('album').trim();
     const errorEl = document.getElementById('formError');
+    errorEl.hidden = true;
     if (!artist || !album) {
       errorEl.textContent = 'Sanatçı ve albüm adı zorunlu.';
       errorEl.hidden = false;
@@ -1055,7 +1075,7 @@ async function renderForm(id) {
     }
     // Adların yazıldığı (ya da kapaktan okunduğu) hali; ilk hali saklanmamış plakta
     // saklanır ki kurallar değişince bu halinden yeniden düzeltilebilsin.
-    const raw = (name) => (e.target.elements[name].dataset.raw ?? f.get(name)).trim();
+    const raw = (name) => (form.elements[name].dataset.raw ?? f.get(name)).trim();
     const typed = { artist: raw('artist'), album: raw('album'), genre: raw('genre'), label: raw('label'), discs: readDiscs(true) };
     const record = normalizeRecord({
       id: r.id || DB.newId(),
@@ -1075,6 +1095,20 @@ async function renderForm(id) {
       casingVersion: CASING_VERSION, // formda yazılan adlar zaten bu sürümle düzeltildi
     });
     if (!record.namesBeforeCasing && nameText(typed) !== nameText(record)) record.namesBeforeCasing = typed;
+    // Bu cihazda açılamayan (bozulmuş) kapak önce internetteki kopyasından onarılır;
+    // plağın şimdiki hali onarımdan (ya da bu arada biten eşitlemeden) sonra okunur.
+    const keep = existing ? ['frontCover', 'backCover'].filter((k) => images[k] === (existing[k] || null)) : [];
+    const stored = keep.length ? await DB.get(existing.id) : null;
+    let broken = false;
+    for (const k of keep) if (stored?.[k] instanceof Blob && !await DB.readable(stored[k])) broken = true;
+    if (broken) {
+      errorEl.textContent = 'Kapak internetteki kopyasından getiriliyor…';
+      errorEl.hidden = false;
+      const repair = Cloud.repairCovers(existing.id, true).catch((err) => { console.error(err); return false; });
+      await Promise.race([repair, new Promise((done) => setTimeout(done, 10000, false))]);
+      errorEl.hidden = true;
+      if (!form.isConnected) return; // beklerken formdan çıkıldı (Vazgeç): kaydedilmez
+    }
     // Değiştirilmeyen kapaklar plağın şimdiki halinden alınır (form açıkken eşitleme
     // ya da onarım değiştirmiş olabilir). Form açıkken plak başka bir cihazda
     // değiştirildiyse (eşitlemeyle geldi), burada değiştirilmeyen alanlar da o yeni halinden alınır.
@@ -1089,18 +1123,6 @@ async function renderForm(id) {
       if (same(record.discs, discsOf(existing))) record.discs = discsOf(current);
       if (current.namesBeforeCasing && !existing.namesBeforeCasing) record.namesBeforeCasing = current.namesBeforeCasing;
     }
-    // Bu cihazda açılamayan (bozulmuş) kapak önce internetteki kopyasından onarılır.
-    const broken = async () => {
-      for (const k of untouched) if (record[k] instanceof Blob && !await DB.readable(record[k])) return true;
-      return false;
-    };
-    if (untouched.length && await broken()) {
-      const repair = Cloud.repairCovers(record.id, true).catch((err) => { console.error(err); return false; });
-      if (await Promise.race([repair, new Promise((done) => setTimeout(done, 10000, false))])) {
-        const now = await DB.get(record.id);
-        if (now) untouched.forEach((k) => { record[k] = now[k] || null; });
-      }
-    }
     try {
       await DB.put(record);
     } catch (err) {
@@ -1113,8 +1135,10 @@ async function renderForm(id) {
       return;
     }
     toast('Kaydedildi');
-    leaveTo(`#/plak/${record.id}`);
-  });
+    // Kaydedilirken başka ekrana geçildiyse oraya dokunulmaz, yalnızca yenilenir.
+    if (form.isConnected) leaveTo(`#/plak/${record.id}`);
+    else refreshFromRemote();
+  }
 }
 
 // ---------- Menü: yedekleme ----------
