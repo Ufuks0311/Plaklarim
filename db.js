@@ -72,18 +72,20 @@ const DB = (() => {
   // Kaydedilecek plaktaki görseller (kapaklar) bellekte yeni bir kopyaya alınır.
   // Veritabanından okunan görsel olduğu gibi yeniden kaydedilince iPhone'da
   // (Safari) bozulabiliyor: plak düzenlenip kaydedilince kapaklar görünmüyordu.
-  // Okunamayan görsel olduğu gibi bırakılır.
+  // Okunamayan (zaten bozuk) görsel olduğu gibi bırakılır; adı unreadable'da döner.
   async function detach(record) {
-    const out = { ...record };
+    const copy = { ...record };
+    const unreadable = [];
     for (const [key, value] of Object.entries(record)) {
       if (!(value instanceof Blob)) continue;
       try {
-        out[key] = new Blob([await value.arrayBuffer()], { type: value.type });
+        copy[key] = new Blob([await value.arrayBuffer()], { type: value.type });
       } catch (err) {
         console.error(err);
+        unreadable.push(key);
       }
     }
-    return out;
+    return { copy, unreadable };
   }
 
   // Kullanıcının yaptığı değişiklikler (kaydet, sil, geri yükle) dinleyicilere bildirilir.
@@ -98,9 +100,18 @@ const DB = (() => {
     onChange: (fn) => listeners.push(fn),
     all: () => tx('readonly', (s) => request(s.getAll())),
     get: (id) => tx('readonly', (s) => request(s.get(id))),
+    // Bozuk görsel yüzünden kaydedilemezse plak o görsel olmadan kaydedilir.
     put: async (record) => {
-      const copy = await detach(record);
-      return tx('readwrite', (s) => request(s.put(copy))).then(changed);
+      const { copy, unreadable } = await detach(record);
+      try {
+        await tx('readwrite', (s) => request(s.put(copy)));
+      } catch (err) {
+        if (!unreadable.length) throw err;
+        console.error(err);
+        unreadable.forEach((key) => { copy[key] = null; });
+        await tx('readwrite', (s) => request(s.put(copy)));
+      }
+      return changed(copy.id);
     },
     remove: (id) => tx('readwrite', (s) => request(s.delete(id))).then(changed),
 
@@ -108,7 +119,7 @@ const DB = (() => {
     // silinir) ve eşitleme kaydı (entry; null ise silinir) aynı işlemde yazılır.
     // Bu arada plak bu cihazda değiştirildiyse dokunulmaz, false döner.
     swap: async (id, check, next, entry) => {
-      const copy = next && await detach(next);
+      const copy = next && (await detach(next)).copy;
       return tx('readwrite', ([records, sync]) => new Promise((resolve) => {
         const get = records.get(id);
         get.onsuccess = () => {
