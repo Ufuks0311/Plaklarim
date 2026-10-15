@@ -817,16 +817,17 @@ async function renderForm(id) {
   // düğmeye (Kaydet, ×) dokunmak numara kutusundan çıkarmaz, "change" gelmez.
   // Önce kutudan çıkılır: odaktaki satırı taşımak tarayıcıya kutudan çıkarttırır ve
   // taşıma ortasında ikinci bir "change" gelirdi.
-  // Bir taşıma yapıldıysa true döner.
+  // Bir taşıma yapıldıysa (satırlar yer değiştirdiyse) true döner.
   function applyTypedNumber() {
+    const rowsBefore = [...discsEl.querySelectorAll('.track-row')];
     const active = document.activeElement;
     if (active?.matches('.t-no') && discsEl.contains(active)) {
       active.blur(); // yazılan numara değiştiyse "change" burada gelir
       if (!pendingMove && active.value !== (active.dataset.prev ?? '')) pendingMove = Object.assign(() => moveByNumber(active), { input: active });
     }
-    const ran = Boolean(pendingMove);
     runPendingMove();
-    return ran;
+    const rowsAfter = discsEl.querySelectorAll('.track-row');
+    return rowsAfter.length !== rowsBefore.length || rowsBefore.some((r, i) => r !== rowsAfter[i]);
   }
   // iPhone'da boş bir yere dokunmak da numara kutusundan çıkarmaz (klavye açık kalır);
   // formda yazı kutusu ya da düğme dışında bir yere dokununca kutudan çıkılır.
@@ -948,6 +949,43 @@ async function renderForm(id) {
     row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
+  // ⠿ üzerinden fiskeyle kaydırılan sayfa, parmak kalkınca iPhone'daki gibi yavaşlayarak
+  // kaymayı sürdürür. Ekrana yeniden dokunmak durdurur; o dokunuş bir şeye tıklamaz.
+  function coast(samples, upTime) {
+    const recent = samples.filter(([t]) => t >= upTime - 100); // son 100 ms
+    if (recent.length < 2) return; // parmak durup kalktı
+    const [t0, y0] = recent[0];
+    const [t1, y1] = recent[recent.length - 1];
+    let v = (y0 - y1) / Math.max(t1 - t0, 1); // px/ms; artı: sayfa aşağı kayar
+    let pos = window.scrollY;
+    let last = 0;
+    let frame = requestAnimationFrame(step);
+    function step(now) {
+      const dt = last ? Math.min(now - last, 50) : 16;
+      last = now;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      pos = Math.min(Math.max(pos + v * dt, 0), max);
+      window.scrollTo(0, pos);
+      v *= 0.998 ** dt;
+      if (Math.abs(v) < 0.02 || pos <= 0 || pos >= max) halt();
+      else frame = requestAnimationFrame(step);
+    }
+    function halt() {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointerdown', touched, true);
+      window.removeEventListener('wheel', halt);
+    }
+    function touched() {
+      halt();
+      const swallow = (c) => { c.preventDefault(); c.stopImmediatePropagation(); };
+      document.addEventListener('click', swallow, { capture: true, once: true });
+      const unswallow = () => setTimeout(() => document.removeEventListener('click', swallow, true), 600);
+      ['pointerup', 'pointercancel'].forEach((type) => window.addEventListener(type, unswallow, { once: true }));
+    }
+    window.addEventListener('pointerdown', touched, true);
+    window.addEventListener('wheel', halt, { passive: true });
+  }
+
   // Şarkılar × düğmesinin altındaki tutamaktan (⠿) sürüklenerek sıralanır ya da başka
   // yüze, başka plağa taşınır (ör. kapakta hepsi A yüzüne okunduysa bir kısmı B yüzüne).
   // Satır parmağı izleyerek yer değiştirir; ekranın kenarına gelince sayfa kayar.
@@ -957,8 +995,13 @@ async function renderForm(id) {
     if (!handle || e.button > 0) return;
     e.preventDefault();
     // Bu basışta satırlar parmağın altından kayabilir; parmak kalkınca gelen tıklama
-    // altta kalan × düğmesine gidip başka bir şarkıyı silmesin.
-    const swallow = (c) => { c.preventDefault(); c.stopImmediatePropagation(); };
+    // altta kalan × düğmesine gidip başka bir şarkıyı silmesin. Tutamağın kendisine
+    // giden tıklama geçer (açık ⋮ menüsü kapansın).
+    const swallow = (c) => {
+      if (c.target.closest?.('.drag-handle') === handle) return;
+      c.preventDefault();
+      c.stopImmediatePropagation();
+    };
     const unswallow = () => document.removeEventListener('click', swallow, true);
     document.addEventListener('click', swallow, { capture: true, once: true });
     document.addEventListener('pointerdown', unswallow, { capture: true, once: true });
@@ -968,14 +1011,18 @@ async function renderForm(id) {
     document.activeElement?.blur();
     const row = handle.closest('.track-row');
     const from = row?.closest('.tracks');
-    if (!from) return;
+    if (!from || isEmptyRow(row)) return; // boş satır şarkı değildir, taşınmaz
     const numbersBefore = firstNumbers(discsEl);
+    const homeList = row.parentElement;
+    const homeNext = row.nextElementSibling;
     const pointerId = e.pointerId;
     const downTime = e.timeStamp;
     const startY = e.clientY;
+    const grab = startY - row.getBoundingClientRect().top; // parmağın satırdaki yeri
     let fingerY = startY;
     let moved = false; // parmak kıpırdamadan basılı tutmak satırı yerinden oynatmaz
     let scrolling = false;
+    const samples = []; // kaydırırken parmağın son konumları (zaman, y)
     let changed = false;
     let frame = 0;
     row.classList.add('dragging');
@@ -985,16 +1032,22 @@ async function renderForm(id) {
     capture();
 
     function place() {
-      const y = Math.max(fingerY, topbar.getBoundingClientRect().bottom + 1); // üst çubuğun altına konmaz
+      // Satırın parmakla birlikte gideceği üst kenar; üst çubuğun altına konmaz.
+      const top = Math.max(fingerY - grab, topbar.getBoundingClientRect().bottom + 1);
+      const y = top + grab;
       const sides = [...discsEl.querySelectorAll('.tracks')];
       const boxes = sides.map((fs) => fs.getBoundingClientRect());
       const dist = (b) => (y < b.top ? b.top - y : y > b.bottom ? y - b.bottom : 0);
       const fs = sides[boxes.reduce((best, b, i) => (dist(b) < dist(boxes[best]) ? i : best), 0)];
       const list = fs.querySelector('.track-rows');
+      // Satır listeden çıkarılmış gibi bakılır (altındakiler onun boyu kadar yukarıda
+      // sayılır); böylece parmak geri gelince satır da eski yerine döner.
+      const h = row.getBoundingClientRect().height;
+      let below = false;
       const before = [...list.children].find((other) => {
-        if (other === row) return false;
+        if (other === row) { below = true; return false; }
         const b = other.getBoundingClientRect();
-        return y < b.top + b.height / 2;
+        return top < b.top + b.height / 2 - (below ? h : 0);
       }) || null;
       if (row.parentElement !== list || row.nextElementSibling !== before) {
         list.insertBefore(row, before);
@@ -1007,10 +1060,12 @@ async function renderForm(id) {
       if (moved) {
         // Kenara yaklaşınca sayfa kayar; üstte kenar, üst çubuğun (iPhone'da saat
         // şeridiyle birlikte) altından ölçülür.
+        // Şarkı listesinin başı ya da sonu göründüyse daha fazla kaymaz.
         const edge = 72;
         const top = topbar.getBoundingClientRect().bottom;
-        if (fingerY < top + edge) window.scrollBy(0, -Math.ceil((top + edge - Math.max(fingerY, top)) / 6));
-        else if (fingerY > window.innerHeight - edge) window.scrollBy(0, Math.ceil((fingerY - window.innerHeight + edge) / 6));
+        const span = discsEl.getBoundingClientRect();
+        if (fingerY < top + edge && span.top < top) window.scrollBy(0, -Math.ceil((top + edge - Math.max(fingerY, top)) / 6));
+        else if (fingerY > window.innerHeight - edge && span.bottom > window.innerHeight) window.scrollBy(0, Math.ceil((fingerY - window.innerHeight + edge) / 6));
         place();
       }
       frame = requestAnimationFrame(tick);
@@ -1022,6 +1077,7 @@ async function renderForm(id) {
       if (scrolling) {
         window.scrollBy(0, fingerY - ev.clientY);
         fingerY = ev.clientY;
+        samples.push([ev.timeStamp, fingerY]);
         return;
       }
       fingerY = ev.clientY;
@@ -1030,6 +1086,7 @@ async function renderForm(id) {
         // parmak ⠿'e denk gelince şarkılar karışmasın).
         if (e.pointerType !== 'mouse' && Math.abs(fingerY - startY) / Math.max(ev.timeStamp - downTime, 1) > 0.3) { // px/ms
           scrolling = true;
+          samples.push([downTime, startY], [ev.timeStamp, fingerY]);
           row.classList.remove('dragging');
           window.scrollBy(0, startY - fingerY);
           return;
@@ -1047,9 +1104,20 @@ async function renderForm(id) {
     function end(ev) {
       if (ev.pointerId !== pointerId) return;
       stop();
+      if (scrolling) coast(samples, ev.timeStamp);
       if (!changed || !row.isConnected || !from.isConnected) return;
+      // Bırakılan satır üst çubuğun altında ya da ekranın dışında kaldıysa görünür yere kaydırılır.
+      const barBottom = topbar.getBoundingClientRect().bottom;
+      const box = row.getBoundingClientRect();
+      if (box.top < barBottom) window.scrollBy(0, box.top - barBottom - 8);
+      else if (box.bottom > window.innerHeight) window.scrollBy(0, box.bottom - window.innerHeight + 8);
+      if (row.parentElement === homeList && row.nextElementSibling === homeNext) return; // yerine geri bırakıldı
       const to = row.closest('.tracks');
-      if (to !== from) {
+      if (to === from) {
+        // "+ Şarkı ekle" ile açılmış boş satır şarkıların arasında kalmasın, sona gider.
+        const list = row.parentElement;
+        [...list.children].forEach((other) => { if (other !== row && isEmptyRow(other)) list.append(other); });
+      } else {
         to.querySelectorAll('.track-row').forEach((other) => { if (other !== row && isEmptyRow(other)) other.remove(); });
         if (!from.querySelector('.track-row')) {
           from.querySelector('.track-rows').insertAdjacentHTML('beforeend', trackRow(undefined, from.dataset.side, 0));
