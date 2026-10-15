@@ -191,7 +191,18 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 .form .track-row .t-no { grid-column: 1; grid-row: 1; text-align: center; }
 .track-row .t-title { grid-column: 2; grid-row: 1; }
 .track-row .t-artist { grid-column: 2; grid-row: 2; }
-.track-row .remove-track { grid-column: 3; grid-row: 1 / span 2; align-self: center; color: var(--muted); }
+.track-row .remove-track { grid-column: 3; grid-row: 1; align-self: center; color: var(--muted); }
+/* Şarkı, × düğmesinin altındaki ⠿ tutamağından sürüklenerek taşınır. */
+.drag-handle {
+  grid-column: 3; grid-row: 2; align-self: stretch;
+  font-size: 1.2rem; line-height: 1; color: var(--muted); cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.track-row.dragging {
+  position: relative; z-index: 1; border-radius: 8px; border-bottom-color: transparent;
+  background: var(--surface); box-shadow: 0 0 0 2px var(--accent), 0 6px 18px rgb(0 0 0 / .25);
+}
+.track-row.dragging .drag-handle { color: var(--accent); cursor: grabbing; }
 /* Numarası yazılarak taşınan şarkı bir an vurgulanır. */
 .track-row.moved { border-radius: 8px; animation: track-moved 1.4s ease-out; }
 @keyframes track-moved { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }

@@ -483,6 +483,7 @@ function trackRow(t = { no: '', title: '', artist: '' }, letter, i) {
       <input class="t-title" placeholder="Şarkı adı" value="${esc(t.title)}" autocomplete="off" aria-label="Şarkı adı">
       <input class="t-artist" placeholder="Söyleyen" value="${esc(t.artist)}" autocomplete="off" aria-label="Söyleyen">
       <button type="button" class="icon-btn remove-track" aria-label="Şarkıyı sil">×</button>
+      <button type="button" class="icon-btn drag-handle" tabindex="-1" aria-label="Sürükleyerek taşı">⠿</button>
     </li>`;
 }
 
@@ -664,8 +665,8 @@ async function renderForm(id) {
       </label>
       <p class="hint">Albüm birden fazla plaktan oluşuyorsa plak sayısını seç; her plağın yüzleri (A-B, C-D…) ayrı listelenir.
         Karma plaklarda her şarkının söyleyenini ayrıca yaz; boş bırakılırsa albüm sanatçısı sayılır.
-        Bir şarkıyı başka yere taşımak için numara kutusuna gideceği yerin numarasını yaz
-        (ör. B yüzünün başına taşımak için B1); diğer numaralar kendiliğinden kayar.</p>
+        Bir şarkıyı başka yere taşımak için × altındaki ⠿ tutamağına basılı tutup sürükle ya da numara kutusuna
+        gideceği yerin numarasını yaz (ör. B yüzünün başına B1); diğer numaralar kendiliğinden kayar.</p>
       <div id="discs" class="${discs.length > 1 ? 'multi' : ''}">${discs.map(discEditor).join('')}</div>
       <label>Notlar
         <textarea name="notes" rows="3" placeholder="Baskı, durum, nereden alındığı…">${esc(r.notes)}</textarea>
@@ -730,15 +731,27 @@ async function renderForm(id) {
   function wireTrackEditor(fs) {
     const rows = fs.querySelector('.track-rows');
     fs.querySelector('.add-track').addEventListener('click', () => {
+      // Yazılmış numara önce uygulanır; yoksa taşıma yeni açılan boş satırı silerdi.
+      applyTypedNumber();
       rows.insertAdjacentHTML('beforeend', trackRow(undefined, fs.dataset.side, rows.children.length));
       rows.lastElementChild.querySelector('.t-title').focus();
     });
     rows.addEventListener('click', (e) => {
       const btn = e.target.closest('.remove-track');
       if (!btn) return;
+      // Silinen şarkının kutusuna yazılmış numara uygulanmaz: şarkı önce taşınır (plak
+      // eklenir, bir yüz satırsız kalır), sonra silinirdi. Başka satıra yazılan uygulanır.
+      const box = btn.closest('.track-row').querySelector('.t-no');
+      if (document.activeElement === box || pendingMove?.input === box) {
+        box.value = box.dataset.prev ?? '';
+        if (pendingMove?.input === box) pendingMove = null;
+      }
+      applyTypedNumber();
+      if (!btn.isConnected) return;
       const numbersBefore = firstNumbers(discsEl);
+      const list = btn.closest('.track-rows');
       btn.closest('.track-row').remove();
-      if (!rows.children.length) rows.insertAdjacentHTML('beforeend', trackRow(undefined, fs.dataset.side, 0));
+      if (!list.children.length) list.insertAdjacentHTML('beforeend', trackRow(undefined, list.closest('.tracks').dataset.side, 0));
       renumberTracks(discsEl, numbersBefore);
     });
     // Şarkı adında Enter formu göndermesin, alttaki alana geçsin.
@@ -796,19 +809,41 @@ async function renderForm(id) {
   discsEl.addEventListener('change', (e) => {
     if (!e.target.matches('.t-no')) return;
     const input = e.target;
-    pendingMove = () => moveByNumber(input);
+    pendingMove = Object.assign(() => moveByNumber(input), { input });
     if (Tap.active()) Tap.after(runPendingMove);
     else runPendingMove();
+  });
+  // Numara kutusuna yazılmış ama henüz uygulanmamış numarayı uygular. iPhone'da bir
+  // düğmeye (Kaydet, ×) dokunmak numara kutusundan çıkarmaz, "change" gelmez.
+  // Önce kutudan çıkılır: odaktaki satırı taşımak tarayıcıya kutudan çıkarttırır ve
+  // taşıma ortasında ikinci bir "change" gelirdi.
+  // Bir taşıma yapıldıysa (satırlar yer değiştirdiyse) true döner.
+  function applyTypedNumber() {
+    const rowsBefore = [...discsEl.querySelectorAll('.track-row')];
+    const active = document.activeElement;
+    if (active?.matches('.t-no') && discsEl.contains(active)) {
+      active.blur(); // yazılan numara değiştiyse "change" burada gelir
+      if (!pendingMove && active.value !== (active.dataset.prev ?? '')) pendingMove = Object.assign(() => moveByNumber(active), { input: active });
+    }
+    runPendingMove();
+    const rowsAfter = discsEl.querySelectorAll('.track-row');
+    return rowsAfter.length !== rowsBefore.length || rowsBefore.some((r, i) => r !== rowsAfter[i]);
+  }
+  // iPhone'da boş bir yere dokunmak da numara kutusundan çıkarmaz (klavye açık kalır);
+  // formda yazı kutusu ya da düğme dışında bir yere dokununca kutudan çıkılır.
+  document.getElementById('form').addEventListener('pointerdown', (e) => {
+    const active = document.activeElement;
+    if (active?.matches('.t-no') && !e.target.closest('input, textarea, select, button, label, a')) active.blur();
   });
 
   function moveByNumber(input) {
     const row = input.closest('.track-row');
     const from = row?.closest('.tracks');
     if (!from || !row.isConnected) return;
-    const typed = input.value.trim().toUpperCase().replace(/\s+/g, '');
+    let typed = input.value.trim().toUpperCase().replace(/\s+/g, '');
     const m = typed.match(/^([A-Z])?(\d+)$/);
     if (!m) return;
-    const letter = m[1] || '';
+    let letter = m[1] || '';
     const n = parseInt(m[2], 10);
     // Kutudaki ya da (boşsa) soluk yazılı numara.
     const numberOfRow = (other) => {
@@ -839,8 +874,24 @@ async function renderForm(id) {
       while (i > 0 && (numbersBefore.get(sidesList[i]) ?? 2) > 1) i--;
       return sidesList[i];
     };
-    const target = matches.find((other) => other.closest('.tracks') === from)
+    let target = matches.find((other) => other.closest('.tracks') === from)
       || (letter ? matches[0] : continuous ? matches.find((other) => runOf(other.closest('.tracks')) === runOf(from)) : undefined);
+    // Harfli ya da otomatik numaralı (A1, A2…) yüzde düz numara (3) o düzenin
+    // numarasıdır: önce kendi yüzünde (A3), numaralar yüzden yüze sürüyorsa dizinin
+    // diğer yüzlerinde (B6) aranır; yoksa kendi yüzünün o sırası sayılır.
+    const ownNo = (input.dataset.prev ?? '').trim().toUpperCase() || input.placeholder;
+    if (!target && !letter && /^[A-Z]\d+$/.test(ownNo)) {
+      const sameN = rows.filter((other) => {
+        const k = numberOfRow(other).match(/^([A-Z])(\d+)$/);
+        return other !== row && !isEmptyRow(other) && Boolean(k) && parseInt(k[2], 10) === n;
+      });
+      target = sameN.find((other) => other.closest('.tracks') === from)
+        || (continuous ? sameN.find((other) => runOf(other.closest('.tracks')) === runOf(from)) : undefined);
+      if (!target) {
+        letter = from.dataset.side;
+        typed = `${letter}${n}`;
+      }
+    }
     let to;
     let before;
     if (target) {
@@ -888,6 +939,8 @@ async function renderForm(id) {
     if (![...to.querySelectorAll('.t-no')].some((other) => other !== input && other.value.trim())) input.value = '';
     renumberTracks(discsEl, numbersBefore);
     input.dataset.prev = input.value;
+    // Odaktaki kutunun numarası da değişmiş olabilir; değişmeden kalırsa sonra taşıma sayılmasın.
+    if (active?.matches?.('.t-no')) active.dataset.prev = active.value;
     if (active?.isConnected && document.activeElement !== active) active.focus({ preventScroll: true });
     // Taşınan şarkı bir an vurgulanır ve görünür yere kaydırılır.
     row.classList.remove('moved');
@@ -895,6 +948,191 @@ async function renderForm(id) {
     row.classList.add('moved');
     row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
+
+  // ⠿ üzerinden fiskeyle kaydırılan sayfa, parmak kalkınca iPhone'daki gibi yavaşlayarak
+  // kaymayı sürdürür. Ekrana yeniden dokunmak durdurur; o dokunuş bir şeye tıklamaz.
+  function coast(samples, upTime) {
+    const recent = samples.filter(([t]) => t >= upTime - 100); // son 100 ms
+    if (recent.length < 2) return; // parmak durup kalktı
+    const [t0, y0] = recent[0];
+    const [t1, y1] = recent[recent.length - 1];
+    let v = (y0 - y1) / Math.max(t1 - t0, 1); // px/ms; artı: sayfa aşağı kayar
+    let pos = window.scrollY;
+    let last = 0;
+    let frame = requestAnimationFrame(step);
+    function step(now) {
+      const dt = last ? Math.min(now - last, 50) : 16;
+      last = now;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      pos = Math.min(Math.max(pos + v * dt, 0), max);
+      window.scrollTo(0, pos);
+      v *= 0.998 ** dt;
+      if (Math.abs(v) < 0.02 || pos <= 0 || pos >= max) halt();
+      else frame = requestAnimationFrame(step);
+    }
+    function halt() {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointerdown', touched, true);
+      window.removeEventListener('wheel', halt);
+    }
+    function touched() {
+      halt();
+      const swallow = (c) => { c.preventDefault(); c.stopImmediatePropagation(); };
+      document.addEventListener('click', swallow, { capture: true, once: true });
+      const unswallow = () => setTimeout(() => document.removeEventListener('click', swallow, true), 600);
+      ['pointerup', 'pointercancel'].forEach((type) => window.addEventListener(type, unswallow, { once: true }));
+    }
+    window.addEventListener('pointerdown', touched, true);
+    window.addEventListener('wheel', halt, { passive: true });
+  }
+
+  // Şarkılar × düğmesinin altındaki tutamaktan (⠿) sürüklenerek sıralanır ya da başka
+  // yüze, başka plağa taşınır (ör. kapakta hepsi A yüzüne okunduysa bir kısmı B yüzüne).
+  // Satır parmağı izleyerek yer değiştirir; ekranın kenarına gelince sayfa kayar.
+  // Bırakınca numaralar, numarayla taşımadaki gibi yeniden verilir.
+  discsEl.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle || e.button > 0) return;
+    e.preventDefault();
+    // Bu basışta satırlar parmağın altından kayabilir; parmak kalkınca gelen tıklama
+    // altta kalan × düğmesine gidip başka bir şarkıyı silmesin. Tutamağın kendisine
+    // giden tıklama geçer (açık ⋮ menüsü kapansın).
+    const swallow = (c) => {
+      if (c.target.closest?.('.drag-handle') === handle) return;
+      c.preventDefault();
+      c.stopImmediatePropagation();
+    };
+    const unswallow = () => document.removeEventListener('click', swallow, true);
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    document.addEventListener('pointerdown', unswallow, { capture: true, once: true });
+    ['pointerup', 'pointercancel'].forEach((type) => window.addEventListener(type, () => setTimeout(unswallow, 600), { once: true }));
+    // Numara kutusuna yazılmış numara varsa bu basış yalnızca onu uygular (klavye kapanır).
+    if (applyTypedNumber()) return;
+    document.activeElement?.blur();
+    const row = handle.closest('.track-row');
+    const from = row?.closest('.tracks');
+    if (!from || isEmptyRow(row)) return; // boş satır şarkı değildir, taşınmaz
+    const numbersBefore = firstNumbers(discsEl);
+    const homeList = row.parentElement;
+    const homeNext = row.nextElementSibling;
+    const pointerId = e.pointerId;
+    const downTime = e.timeStamp;
+    const startY = e.clientY;
+    const grab = startY - row.getBoundingClientRect().top; // parmağın satırdaki yeri
+    let fingerY = startY;
+    let moved = false; // parmak kıpırdamadan basılı tutmak satırı yerinden oynatmaz
+    let scrolling = false;
+    const samples = []; // kaydırırken parmağın son konumları (zaman, y)
+    let changed = false;
+    let frame = 0;
+    row.classList.add('dragging');
+    // Satır yer değiştirince tarayıcı yakalamayı bırakabilir; olaylar pencereden
+    // dinlenir ve yakalama her taşımadan sonra yenilenir.
+    const capture = () => { try { handle.setPointerCapture(pointerId); } catch { /* parmak kalkmış */ } };
+    capture();
+
+    function place() {
+      // Satırın parmakla birlikte gideceği üst kenar; üst çubuğun altına konmaz.
+      const top = Math.max(fingerY - grab, topbar.getBoundingClientRect().bottom + 1);
+      const y = top + grab;
+      const sides = [...discsEl.querySelectorAll('.tracks')];
+      const boxes = sides.map((fs) => fs.getBoundingClientRect());
+      const dist = (b) => (y < b.top ? b.top - y : y > b.bottom ? y - b.bottom : 0);
+      const fs = sides[boxes.reduce((best, b, i) => (dist(b) < dist(boxes[best]) ? i : best), 0)];
+      const list = fs.querySelector('.track-rows');
+      // Satır listeden çıkarılmış gibi bakılır (altındakiler onun boyu kadar yukarıda
+      // sayılır); böylece parmak geri gelince satır da eski yerine döner.
+      const h = row.getBoundingClientRect().height;
+      let below = false;
+      const before = [...list.children].find((other) => {
+        if (other === row) { below = true; return false; }
+        const b = other.getBoundingClientRect();
+        return top < b.top + b.height / 2 - (below ? h : 0);
+      }) || null;
+      if (row.parentElement !== list || row.nextElementSibling !== before) {
+        list.insertBefore(row, before);
+        changed = true;
+        capture();
+      }
+    }
+    function tick() {
+      if (!row.isConnected) { stop(); return; } // sürüklerken ekran kapandı
+      if (moved) {
+        // Kenara yaklaşınca sayfa kayar; üstte kenar, üst çubuğun (iPhone'da saat
+        // şeridiyle birlikte) altından ölçülür.
+        // Şarkı listesinin başı ya da sonu göründüyse daha fazla kaymaz.
+        const edge = 72;
+        const top = topbar.getBoundingClientRect().bottom;
+        const span = discsEl.getBoundingClientRect();
+        if (fingerY < top + edge && span.top < top) window.scrollBy(0, -Math.ceil((top + edge - Math.max(fingerY, top)) / 6));
+        else if (fingerY > window.innerHeight - edge && span.bottom > window.innerHeight) window.scrollBy(0, Math.ceil((fingerY - window.innerHeight + edge) / 6));
+        place();
+      }
+      frame = requestAnimationFrame(tick);
+    }
+    frame = requestAnimationFrame(tick);
+
+    const move = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      if (scrolling) {
+        window.scrollBy(0, fingerY - ev.clientY);
+        fingerY = ev.clientY;
+        samples.push([ev.timeStamp, fingerY]);
+        return;
+      }
+      fingerY = ev.clientY;
+      if (!moved && Math.abs(fingerY - startY) > 8) {
+        // Parmakla hızlı bir fiske sürükleme değil, sayfayı kaydırır (sayfayı kaydırırken
+        // parmak ⠿'e denk gelince şarkılar karışmasın).
+        if (e.pointerType !== 'mouse' && Math.abs(fingerY - startY) / Math.max(ev.timeStamp - downTime, 1) > 0.3) { // px/ms
+          scrolling = true;
+          samples.push([downTime, startY], [ev.timeStamp, fingerY]);
+          row.classList.remove('dragging');
+          window.scrollBy(0, startY - fingerY);
+          return;
+        }
+        moved = true;
+      }
+    };
+    function stop() {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      row.classList.remove('dragging');
+    }
+    function end(ev) {
+      if (ev.pointerId !== pointerId) return;
+      stop();
+      if (scrolling) coast(samples, ev.timeStamp);
+      if (!changed || !row.isConnected || !from.isConnected) return;
+      // Bırakılan satır üst çubuğun altında ya da ekranın dışında kaldıysa görünür yere kaydırılır.
+      const barBottom = topbar.getBoundingClientRect().bottom;
+      const box = row.getBoundingClientRect();
+      if (box.top < barBottom) window.scrollBy(0, box.top - barBottom - 8);
+      else if (box.bottom > window.innerHeight) window.scrollBy(0, box.bottom - window.innerHeight + 8);
+      if (row.parentElement === homeList && row.nextElementSibling === homeNext) return; // yerine geri bırakıldı
+      const to = row.closest('.tracks');
+      if (to === from) {
+        // "+ Şarkı ekle" ile açılmış boş satır şarkıların arasında kalmasın, sona gider.
+        const list = row.parentElement;
+        [...list.children].forEach((other) => { if (other !== row && isEmptyRow(other)) list.append(other); });
+      } else {
+        to.querySelectorAll('.track-row').forEach((other) => { if (other !== row && isEmptyRow(other)) other.remove(); });
+        if (!from.querySelector('.track-row')) {
+          from.querySelector('.track-rows').insertAdjacentHTML('beforeend', trackRow(undefined, from.dataset.side, 0));
+        }
+        // Gittiği yüzde şarkı varsa ve hiçbirine elle numara yazılmamışsa şarkı da
+        // otomatik numara (B1, B2…) alır.
+        const no = row.querySelector('.t-no');
+        if (numbersBefore.get(to) != null && ![...to.querySelectorAll('.t-no')].some((other) => other !== no && other.value.trim())) no.value = '';
+      }
+      renumberTracks(discsEl, numbersBefore);
+    }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  });
 
   // Kapak fotoğrafından okunan bilgileri forma yazar. Elle girilmiş alanların
   // üzerine yazmaz; şarkı listesi doluysa değiştirmeden önce sorar.
@@ -1061,7 +1299,7 @@ async function renderForm(id) {
   });
 
   async function saveForm(form) {
-    runPendingMove();
+    applyTypedNumber();
     normalizeFormText(null);
     const f = new FormData(form);
     const artist = f.get('artist').trim();

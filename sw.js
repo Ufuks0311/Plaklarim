@@ -1,6 +1,6 @@
 // Uygulama dosyalarını önbelleğe alır; internet yokken de açılır.
 // Dosyalar değiştiğinde CACHE adını artır.
-const CACHE = 'plaklarim-v21';
+const CACHE = 'plaklarim-v22';
 const FILES = [
   './',
   'index.html',
