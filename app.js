@@ -287,6 +287,17 @@ setTopbarHeight();
 
 let lastQuery = '';
 let lastGenre = '';
+// Plaklarım başlığına basınca tür seçimi "Tüm türler"e döner. Liste zaten açıksa
+// adres değişmediği için menü burada sıfırlanır; geri tuşu seçimi korur.
+document.querySelector('.brand').addEventListener('click', () => {
+  if (!lastGenre) return;
+  lastGenre = '';
+  const genre = document.getElementById('genre');
+  if (genre) {
+    genre.value = '';
+    genre.dispatchEvent(new Event('change'));
+  }
+});
 // Liste ekranı açıkken internetten gelen değişiklikleri, arama kutusuna dokunmadan
 // listeye yansıtır.
 let refreshList = null;
