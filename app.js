@@ -193,10 +193,11 @@ async function normalizeStoredRecords() {
 }
 
 const collator = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
-// Sıra numarası olanlar numaraya göre başta, olmayanlar sanatçıya göre sonda.
+// Liste sanatçı adına göre Türkçe abece sırasıyla dizilir (C'den sonra Ç, büyük/küçük
+// harf farkı yok); aynı sanatçının plakları albüm adına, o da aynıysa sıra numarasına göre.
 const byRecordOrder = (a, b) =>
-  (!a.no - !b.no) || collator.compare(a.no || '', b.no || '') ||
-  collator.compare(a.artist, b.artist) || collator.compare(a.album, b.album);
+  collator.compare(a.artist || '', b.artist || '') || collator.compare(a.album || '', b.album || '') ||
+  (!a.no - !b.no) || collator.compare(a.no || '', b.no || '');
 
 function nextRecordNo(records) {
   const nums = records.map((r) => parseInt(r.no, 10)).filter(Number.isFinite);
