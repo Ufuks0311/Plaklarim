@@ -10,7 +10,7 @@ Her plak için saklananlar:
   gerekirse elle sürüklenir ve "Seçimi kullan" ile eğiklik ve perspektif düzeltilerek
   kapak tam kareye oturtulur; beğenilmezse "Tekrar çek" ile yeniden çekilir; telefonun
   geri tuşu köşe ekranını kapatıp forma döner)
-- Koleksiyon sıra numarası, sanatçı, albüm adı, yıl, tür, plak şirketi
+- Sanatçı, albüm adı, yıl, tür, plak şirketi
 - Plak sayısı (varsayılan 1) ve her plağın yüz yüz şarkıları: 1. plak A-B, 2. plak C-D… yüzleri;
   her şarkı sıra numarası (A1, A2, C1…), adı ve söyleyeniyle ayrı tutulur (karma plaklar için).
   Şarkılar × düğmesinin altındaki ⠿ tutamağına basılı tutup sürüklenerek ya da numara
@@ -20,7 +20,9 @@ Her plak için saklananlar:
 - Notlar (baskı, durum, nereden alındığı…)
 
 Liste sanatçı adına göre Türkçe abece sırasıyla dizilir (C'den sonra Ç, I'dan sonra
-İ); aynı sanatçının plakları albüm adına göre sıralanır. Liste ekranında sanatçı,
+İ); aynı sanatçının plakları albüm adına göre sıralanır. Sıra numarası plağın
+listedeki yeridir: ilk plak #1, sonraki #2… Yeni plak eklenince ondan sonra gelenlerin
+numarası birer artar; numara elle yazılmaz. Liste ekranında sanatçı,
 albüm ya da şarkı adına göre arama yapılabilir; arama çubuğu liste kaydırılınca da
 üstte görünür kalır. Arama büyük/küçük harfe ve Türkçe harflere bakmaz: "baris"
 yazınca Barış Manço da bulunur. Plak sayısının yanındaki tür

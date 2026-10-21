@@ -194,15 +194,15 @@ async function normalizeStoredRecords() {
 
 const collator = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
 // Liste sanatçı adına göre Türkçe abece sırasıyla dizilir (C'den sonra Ç, büyük/küçük
-// harf farkı yok); aynı sanatçının plakları albüm adına, o da aynıysa sıra numarasına göre.
+// harf farkı yok); aynı sanatçının plakları albüm adına göre. Eskiden elle yazılan sıra
+// numarası kayıtta durur; yalnızca adları aynı plakların sırasını belirler.
 const byRecordOrder = (a, b) =>
   collator.compare(a.artist || '', b.artist || '') || collator.compare(a.album || '', b.album || '') ||
   (!a.no - !b.no) || collator.compare(a.no || '', b.no || '');
 
-function nextRecordNo(records) {
-  const nums = records.map((r) => parseInt(r.no, 10)).filter(Number.isFinite);
-  return String(nums.length ? Math.max(...nums) + 1 : records.length + 1);
-}
+// Sıra numarası plağın listedeki yeridir: ilk plak 1, sonraki 2… Yeni plak eklenince
+// ondan sonra gelenlerin numarası birer artar, numaralar hep listeyle aynı sırada kalır.
+const recordNumbers = (sorted) => new Map(sorted.map((r, i) => [r.id, i + 1]));
 
 // ---------- Yönlendirme ----------
 
@@ -319,11 +319,12 @@ const NO_GENRE = 'yok';
 // hazırlanmaz. Liste her açılışta plakları veritabanından yeniden okuduğu için
 // düzenlenen plağın eski anahtarları kullanılmaz.
 const matchKeys = new WeakMap();
-function keysOf(r) {
+function keysOf(r, no) {
   let keys = matchKeys.get(r);
-  if (!keys) {
+  if (!keys || keys.no !== no) {
     keys = {
-      text: fold([r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
+      no,
+      text: fold([`#${no}`, r.artist, r.album, r.label, r.genre, r.year,
         ...allTracks(r).flatMap((t) => [t.title, t.artist])].join('\n')),
       genres: genresOf(r).map(genreValue),
     };
@@ -360,6 +361,7 @@ function genreOptions(records) {
 async function renderList() {
   refreshList = null;
   let records = (await DB.all()).sort(byRecordOrder);
+  let numbers = recordNumbers(records);
   const viewer = Cloud.viewer();
   const cloud = Cloud.info();
   view.innerHTML = `
@@ -412,7 +414,7 @@ async function renderList() {
     const term = fold(q.value.trim());
     lastQuery = q.value;
     const shown = !term && !lastGenre ? records : records.filter((r) => {
-      const keys = keysOf(r);
+      const keys = keysOf(r, numbers.get(r.id));
       return (!lastGenre || (lastGenre === NO_GENRE ? !keys.genres.length : keys.genres.includes(lastGenre)))
         && (!term || keys.text.includes(term));
     });
@@ -422,11 +424,11 @@ async function renderList() {
     genre.classList.toggle('active', !!lastGenre);
     grid.innerHTML = shown.map((r) => `
       <li>
-        <a href="#/plak/${esc(r.id)}" class="card${r.no ? ' numbered' : ''}">
+        <a href="#/plak/${esc(r.id)}" class="card">
           ${thumbs.get(r.id)
             ? `<img src="${thumbs.get(r.id)}" alt="" loading="lazy">`
             : '<div class="no-cover" aria-hidden="true"></div>'}
-          ${r.no ? `<span class="badge">#${esc(r.no)}</span>` : ''}
+          <span class="badge">#${numbers.get(r.id)}</span>
           <strong>${esc(r.album)}</strong>
           <span>${esc(r.artist)}${r.year ? ` · ${esc(r.year)}` : ''}${discsOf(r).length > 1 ? ` · ${discsOf(r).length} plak` : ''}</span>
         </a>
@@ -452,6 +454,7 @@ async function renderList() {
     if (!fresh.length) { route({ keepScroll: true }); return; }
     const old = thumbs;
     records = fresh;
+    numbers = recordNumbers(records);
     thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
     fillGenres();
     draw();
@@ -477,11 +480,13 @@ function trackList(title, tracks, albumArtist) {
 }
 
 async function renderDetail(id) {
-  const r = await DB.get(id);
+  const all = (await DB.all()).sort(byRecordOrder);
+  const r = all.find((x) => x.id === id);
   if (!r) {
     view.innerHTML = '<p class="empty">Plak bulunamadı. <a href="#/">Listeye dön</a></p>';
     return;
   }
+  const no = recordNumbers(all).get(id);
   const covers = [['Ön kapak', r.frontCover], ['Arka kapak', r.backCover]]
     .filter(([, blob]) => blob)
     .map(([label, blob]) => {
@@ -503,7 +508,7 @@ async function renderDetail(id) {
 
   view.innerHTML = `
     <article class="detail">
-      ${r.no ? `<p class="record-no">Sıra no #${esc(r.no)}</p>` : ''}
+      <p class="record-no">Sıra no #${no}</p>
       <h1>${esc(r.album)}</h1>
       <p class="artist">${esc(r.artist)}</p>
       ${covers ? `<div class="covers">${covers}</div>` : ''}
@@ -712,7 +717,7 @@ async function renderForm(id) {
     view.innerHTML = '<p class="empty">Plak bulunamadı. <a href="#/">Listeye dön</a></p>';
     return;
   }
-  const r = existing || { no: nextRecordNo(await DB.all()) };
+  const r = existing || {};
   const discs = discsOf(r);
   const images = { frontCover: r.frontCover || null, backCover: r.backCover || null };
 
@@ -727,9 +732,6 @@ async function renderForm(id) {
         ${coverPicker('backCover', 'Arka kapak', images.backCover)}
       </div>
 
-      <label class="no-field">Sıra no
-        <input name="no" inputmode="numeric" value="${esc(r.no)}" autocomplete="off">
-      </label>
       <label>Sanatçı *
         <input name="artist" required value="${esc(r.artist)}" autocomplete="off">
       </label>
@@ -1410,7 +1412,7 @@ async function renderForm(id) {
     const typed = { artist: raw('artist'), album: raw('album'), genre: raw('genre'), label: raw('label'), discs: readDiscs(true) };
     const record = normalizeRecord({
       id: r.id || DB.newId(),
-      no: f.get('no').trim(),
+      no: r.no || '',
       artist,
       album,
       year: f.get('year').trim(),

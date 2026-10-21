@@ -220,7 +220,6 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 .track-row.moved { border-radius: 8px; animation: track-moved 1.4s ease-out; }
 @keyframes track-moved { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
 @media (prefers-reduced-motion: reduce) { .track-row.moved { animation: none; } }
-.form .no-field input { max-width: 8rem; }
 .tracklist { list-style: none; margin: 0; padding: 0; }
 .tracklist li { display: flex; gap: .75rem; padding: .25rem 0; }
 .track-no { color: var(--muted); min-width: 2rem; font-variant-numeric: tabular-nums; }
