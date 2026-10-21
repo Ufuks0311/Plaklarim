@@ -90,7 +90,7 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 }
 .count { color: var(--muted); font-size: .85rem; margin: .75rem .25rem; }
 .list-bar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: .75rem .25rem; }
-.list-bar .count { margin: 0; }
+.list-bar .count { margin: 0; white-space: nowrap; flex-shrink: 0; }
 .genre-select {
   min-width: 0; max-width: 60%; padding: .4rem 2rem .4rem .85rem;
   font: inherit; color: var(--text); text-overflow: ellipsis;

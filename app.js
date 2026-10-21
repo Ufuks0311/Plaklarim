@@ -291,14 +291,34 @@ let lastGenre = '';
 // listeye yansıtır.
 let refreshList = null;
 
+// Arama ve tür karşılaştırması büyük/küçük harfe ve Türkçe harflere bakmaz: "iron"
+// Iron Maiden'ı, "baris" Barış'ı bulur; "Indie" ile "İndie" aynı türdür.
+const fold = (text) => String(text).toLocaleLowerCase('tr').replace(/ı/g, 'i')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
 // Tür alanında virgül, noktalı virgül ya da eğik çizgiyle ayrılmış birden çok tür
 // olabilir ("Rock, Pop Rock"); plak her birinin altında listelenir.
 const genresOf = (r) => String(r.genre || '').split(/[,;/]/)
   .map((g) => g.trim().replace(/\s+/g, ' ')).filter(Boolean);
-const genreValue = (name) => `g:${name.toLocaleLowerCase('tr')}`;
+const genreValue = (name) => `g:${fold(name)}`;
 const NO_GENRE = 'yok';
-const genreMatches = (r, value) => !value
-  || (value === NO_GENRE ? !genresOf(r).length : genresOf(r).some((name) => genreValue(name) === value));
+
+// Arama metni ve tür anahtarları her plak için bir kez hazırlanır, her tuşta yeniden
+// hazırlanmaz. Liste her açılışta plakları veritabanından yeniden okuduğu için
+// düzenlenen plağın eski anahtarları kullanılmaz.
+const matchKeys = new WeakMap();
+function keysOf(r) {
+  let keys = matchKeys.get(r);
+  if (!keys) {
+    keys = {
+      text: fold([r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
+        ...allTracks(r).flatMap((t) => [t.title, t.artist])].join('\n')),
+      genres: genresOf(r).map(genreValue),
+    };
+    matchKeys.set(r, keys);
+  }
+  return keys;
+}
 
 // Menüdeki türler: büyük/küçük harf farkı yok sayılır, aynı tür farklı yazılmışsa
 // en çok kullanılan yazılışı gösterilir; her türün yanında plak sayısı durur.
@@ -376,12 +396,13 @@ async function renderList() {
   }
 
   function draw() {
-    const term = q.value.trim().toLocaleLowerCase('tr');
+    const term = fold(q.value.trim());
     lastQuery = q.value;
-    const shown = records.filter((r) => genreMatches(r, lastGenre)
-      && (!term || [r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
-        ...allTracks(r).flatMap((t) => [t.title, t.artist])]
-        .join('\n').toLocaleLowerCase('tr').includes(term)));
+    const shown = records.filter((r) => {
+      const keys = keysOf(r);
+      return (!lastGenre || (lastGenre === NO_GENRE ? !keys.genres.length : keys.genres.includes(lastGenre)))
+        && (!term || keys.text.includes(term));
+    });
     count.textContent = term || lastGenre
       ? `${shown.length} / ${records.length} plak`
       : `${records.length} plak`;
