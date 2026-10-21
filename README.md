@@ -20,7 +20,12 @@ Her plak için saklananlar:
 - Notlar (baskı, durum, nereden alındığı…)
 
 Liste ekranında sanatçı, albüm ya da şarkı adına göre arama yapılabilir; arama
-çubuğu liste kaydırılınca da üstte görünür kalır.
+çubuğu liste kaydırılınca da üstte görünür kalır. Arama büyük/küçük harfe ve Türkçe
+harflere bakmaz: "baris" yazınca Barış Manço da bulunur. Plak sayısının yanındaki tür
+menüsünden bir tür seçilince yalnızca o türdeki plaklar listelenir ("Tüm türler"
+hepsini geri getirir). Menüde her türün yanında kaç plak olduğu yazar; "Rock, Pop"
+gibi birden çok tür yazılmış plak her iki türde de çıkar. Arama ve tür birlikte
+kullanılabilir.
 
 Sanatçı, albüm, tür, plak şirketi ve şarkı adları her kelimenin ilk harfi büyük,
 gerisi küçük olacak biçimde saklanır; notlar olduğu gibi kalır. Plağın dili

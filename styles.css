@@ -89,6 +89,19 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
   background: var(--surface); color: var(--text);
 }
 .count { color: var(--muted); font-size: .85rem; margin: .75rem .25rem; }
+.list-bar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: .75rem .25rem; }
+.list-bar .count { margin: 0; white-space: nowrap; flex-shrink: 0; }
+.genre-select {
+  min-width: 0; max-width: 60%; padding: .4rem 2rem .4rem .85rem;
+  font: inherit; color: var(--text); text-overflow: ellipsis;
+  -webkit-appearance: none; appearance: none;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2378716c' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right .8rem center / .7rem;
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.genre-select.active { border-color: var(--accent); }
+@media (prefers-color-scheme: dark) {
+  .genre-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23a8a29e' stroke-width='1.6'/%3E%3C/svg%3E"); }
+}
 
 .grid {
   list-style: none; margin: 0; padding: 0;
@@ -282,4 +295,4 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 
 /* iPhone, yazısı 16 pikselden küçük kutuya dokununca ekranı büyütür ve öyle bırakır. */
 .form input:not([type=file]), .form textarea, .form select, .form .track-row .t-artist,
-.cloud-form input, .search input { font-size: 16px; }
+.cloud-form input, .search input, .genre-select { font-size: 16px; }
