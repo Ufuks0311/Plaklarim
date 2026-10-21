@@ -25,7 +25,8 @@ harflere bakmaz: "baris" yazınca Barış Manço da bulunur. Plak sayısının y
 menüsünden bir tür seçilince yalnızca o türdeki plaklar listelenir ("Tüm türler"
 hepsini geri getirir). Menüde her türün yanında kaç plak olduğu yazar; "Rock, Pop"
 gibi birden çok tür yazılmış plak her iki türde de çıkar. Arama ve tür birlikte
-kullanılabilir.
+kullanılabilir. Üstteki Plaklarım yazısına basınca tür yeniden "Tüm türler" olur;
+plak sayfasından geri tuşuyla dönünce seçilen tür korunur.
 
 Sanatçı, albüm, tür, plak şirketi ve şarkı adları her kelimenin ilk harfi büyük,
 gerisi küçük olacak biçimde saklanır; notlar olduğu gibi kalır. Plağın dili
