@@ -369,7 +369,8 @@ async function renderList() {
   const genre = document.getElementById('genre');
 
   if (!records.length) {
-    count.textContent = '';
+    // Boş ekranda tür menüsünün satırı kalkar; boş sayı satırı eskisi gibi tek boşluk bırakır.
+    count.parentElement.replaceWith(count);
     grid.outerHTML = viewer
       ? `<div class="empty"><p>${esc({ ok: 'Listede henüz plak yok.', error: Cloud.status().text }[Cloud.status().state] || 'Plaklar yükleniyor…')}</p></div>`
       : `<div class="empty">
@@ -398,7 +399,7 @@ async function renderList() {
   function draw() {
     const term = fold(q.value.trim());
     lastQuery = q.value;
-    const shown = records.filter((r) => {
+    const shown = !term && !lastGenre ? records : records.filter((r) => {
       const keys = keysOf(r);
       return (!lastGenre || (lastGenre === NO_GENRE ? !keys.genres.length : keys.genres.includes(lastGenre)))
         && (!term || keys.text.includes(term));
