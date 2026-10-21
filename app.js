@@ -286,9 +286,44 @@ else window.addEventListener('resize', setTopbarHeight);
 setTopbarHeight();
 
 let lastQuery = '';
+let lastGenre = '';
 // Liste ekranı açıkken internetten gelen değişiklikleri, arama kutusuna dokunmadan
 // listeye yansıtır.
 let refreshList = null;
+
+// Tür alanında virgül, noktalı virgül ya da eğik çizgiyle ayrılmış birden çok tür
+// olabilir ("Rock, Pop Rock"); plak her birinin altında listelenir.
+const genresOf = (r) => String(r.genre || '').split(/[,;/]/)
+  .map((g) => g.trim().replace(/\s+/g, ' ')).filter(Boolean);
+const genreValue = (name) => `g:${name.toLocaleLowerCase('tr')}`;
+const NO_GENRE = 'yok';
+const genreMatches = (r, value) => !value
+  || (value === NO_GENRE ? !genresOf(r).length : genresOf(r).some((name) => genreValue(name) === value));
+
+// Menüdeki türler: büyük/küçük harf farkı yok sayılır, aynı tür farklı yazılmışsa
+// en çok kullanılan yazılışı gösterilir; her türün yanında plak sayısı durur.
+function genreOptions(records) {
+  const groups = new Map();
+  let none = 0;
+  for (const r of records) {
+    const names = genresOf(r);
+    if (!names.length) none++;
+    const seen = new Set();
+    for (const name of names) {
+      const value = genreValue(name);
+      const group = groups.get(value) || { value, count: 0, spellings: new Map() };
+      groups.set(value, group);
+      group.spellings.set(name, (group.spellings.get(name) || 0) + 1);
+      if (!seen.has(value)) { seen.add(value); group.count++; }
+    }
+  }
+  const options = [...groups.values()].map((g) => ({
+    value: g.value,
+    name: [...g.spellings].reduce((a, b) => (b[1] > a[1] ? b : a))[0],
+    count: g.count,
+  })).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  return { options, none };
+}
 
 async function renderList() {
   refreshList = null;
@@ -300,7 +335,10 @@ async function renderList() {
     <div class="search">
       <input type="search" id="q" placeholder="Sanatçı, albüm veya şarkı ara" value="${esc(lastQuery)}" autocomplete="off">
     </div>
-    <p class="count" id="count"></p>
+    <div class="list-bar">
+      <p class="count" id="count"></p>
+      <select id="genre" class="genre-select" aria-label="Türe göre seç" hidden></select>
+    </div>
     <ul class="grid" id="grid"></ul>
     ${viewer ? '' : '<a href="#/yeni" class="fab" aria-label="Yeni plak ekle">+</a>'}
   `;
@@ -308,6 +346,7 @@ async function renderList() {
   const grid = document.getElementById('grid');
   const count = document.getElementById('count');
   const q = document.getElementById('q');
+  const genre = document.getElementById('genre');
 
   if (!records.length) {
     count.textContent = '';
@@ -323,17 +362,30 @@ async function renderList() {
 
   let thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
 
+  // Seçili tür artık hiçbir plakta yoksa (plak silindi ya da türü değişti) bütün türlere dönülür.
+  function fillGenres() {
+    const { options, none } = genreOptions(records);
+    if (!options.length || (lastGenre === NO_GENRE ? !none : !options.some((o) => o.value === lastGenre))) {
+      lastGenre = '';
+    }
+    genre.hidden = !options.length;
+    genre.innerHTML = '<option value="">Tüm türler</option>'
+      + options.map((o) => `<option value="${esc(o.value)}">${esc(o.name)} (${o.count})</option>`).join('')
+      + (none ? `<option value="${NO_GENRE}">Türü yazılmamış (${none})</option>` : '');
+    genre.value = lastGenre;
+  }
+
   function draw() {
     const term = q.value.trim().toLocaleLowerCase('tr');
     lastQuery = q.value;
-    const shown = term
-      ? records.filter((r) => [r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
-          ...allTracks(r).flatMap((t) => [t.title, t.artist])]
-          .join('\n').toLocaleLowerCase('tr').includes(term))
-      : records;
-    count.textContent = term
+    const shown = records.filter((r) => genreMatches(r, lastGenre)
+      && (!term || [r.no && `#${r.no}`, r.artist, r.album, r.label, r.genre, r.year,
+        ...allTracks(r).flatMap((t) => [t.title, t.artist])]
+        .join('\n').toLocaleLowerCase('tr').includes(term)));
+    count.textContent = term || lastGenre
       ? `${shown.length} / ${records.length} plak`
       : `${records.length} plak`;
+    genre.classList.toggle('active', !!lastGenre);
     grid.innerHTML = shown.map((r) => `
       <li>
         <a href="#/plak/${esc(r.id)}" class="card${r.no ? ' numbered' : ''}">
@@ -352,6 +404,12 @@ async function renderList() {
     draw();
     if (window.scrollY > 0) window.scrollTo(0, 0);
   });
+  genre.addEventListener('change', () => {
+    lastGenre = genre.value;
+    draw();
+    if (window.scrollY > 0) window.scrollTo(0, 0);
+  });
+  fillGenres();
   draw();
 
   refreshList = async () => {
@@ -361,6 +419,7 @@ async function renderList() {
     const old = thumbs;
     records = fresh;
     thumbs = new Map(records.map((r) => [r.id, r.frontCover ? blobUrl(r.frontCover) : '']));
+    fillGenres();
     draw();
     old.forEach((url) => url && URL.revokeObjectURL(url));
   };
